@@ -1,4 +1,4 @@
-name: Build Android APK (Debug)
+name: Build Android APK (Debug, no-wrapper)
 
 on:
   push:
@@ -28,13 +28,17 @@ jobs:
           sdkmanager --install "platform-tools" "build-tools;34.0.0" "platforms;android-34"
           yes | sdkmanager --licenses
 
-      - name: Validate Gradle Wrapper
-        uses: gradle/wrapper-validation-action@v2
-
+      # Usa Gradle 8.9 fornecido pela action (não precisa de gradlew no repo)
       - name: Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace --no-daemon
+        uses: gradle/gradle-build-action@v3
+        with:
+          gradle-version: 8.9
+          # Se o projeto estiver na raiz, deixe "assembleDebug".
+          # Se estiver numa pasta, por ex. "android/", troque por "--project-dir android assembleDebug".
+          arguments: assembleDebug --stacktrace --no-daemon
 
       - name: Upload APK artifact
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk
