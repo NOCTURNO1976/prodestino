@@ -1,16 +1,9 @@
 pluginManagement {
-    repositories {
-        gradlePluginPortal()
-        google()
-        mavenCentral()
-    }
+  repositories { gradlePluginPortal(); google(); mavenCentral() }
 }
 dependencyResolutionManagement {
-    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
-    repositories {
-        google()
-        mavenCentral()
-    }
+  repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+  repositories { google(); mavenCentral() }
 }
 rootProject.name = "ProDestinoWebView"
-include(":app")      // se sua pasta do módulo não for "app", troque aqui
+include(":app")
