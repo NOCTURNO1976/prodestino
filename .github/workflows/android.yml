@@ -1,4 +1,4 @@
-name: Build Android APK (Debug)
+name: Build Android APK (Debug, no-wrapper)
 
 on:
   push:
@@ -28,11 +28,12 @@ jobs:
           sdkmanager --install "platform-tools" "build-tools;34.0.0" "platforms;android-34"
           yes | sdkmanager --licenses
 
-      - name: Validate Gradle Wrapper
-        uses: gradle/wrapper-validation-action@v2
-
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace --no-daemon
+      # 👇 Usa Gradle 8.9 sem depender do wrapper do projeto
+      - name: Build Debug APK (Gradle 8.9, no wrapper)
+        uses: gradle/gradle-build-action@v3
+        with:
+          gradle-version: 8.9
+          arguments: assembleDebug --stacktrace --no-daemon
 
       - name: Upload APK artifact
         if: success()
