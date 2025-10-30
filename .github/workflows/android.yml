@@ -1,4 +1,4 @@
-name: Build Android APK (Debug)
+name: Build Android APK (Debug, no-wrapper)
 
 on:
   push:
@@ -27,30 +27,22 @@ jobs:
           sdkmanager --install "platform-tools" "build-tools;34.0.0" "platforms;android-34"
           yes | sdkmanager --licenses
 
-      # ---- Gerar o Gradle Wrapper (8.9) só para este job ----
-      # Usa a action antiga APENAS para rodar a tarefa 'wrapper'.
-      - name: Generate Gradle Wrapper (8.9)
+      # Diagnóstico rápido: mostra os arquivos-chave
+      - name: Show project files
+        run: |
+          echo "--- ROOT ---"; ls -la
+          echo "--- app ---"; ls -la app || true
+          echo "--- settings.gradle ---"; sed -n '1,120p' settings.gradle || true
+          echo "--- root build.gradle ---"; sed -n '1,120p' build.gradle || true
+
+      # Usa Gradle 8.9 provisionado pela action (sem wrapper no repo)
+      - name: Build Debug APK (Gradle 8.9)
         uses: gradle/gradle-build-action@v3
         with:
           gradle-version: 8.9
-          arguments: wrapper --gradle-version 8.9 --distribution-type bin
+          # Se o módulo está na raiz como :app, mantenha:
+          arguments: assembleDebug --stacktrace --no-daemon
 
-      - name: Make gradlew executable
-        run: chmod +x gradlew
-
-      # ---- Validação do wrapper (segurança contra tampering) ----
-      - name: Validate Gradle Wrapper
-        uses: gradle/actions/wrapper-validation@v3
-
-      # ---- Configura cache moderno do Gradle / Build Scan detection ----
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-
-      # ---- Build usando o wrapper recém-gerado ----
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace --no-daemon
-
-      # ---- Publicar o APK gerado como artifact do job ----
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
