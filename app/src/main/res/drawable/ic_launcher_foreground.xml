@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Círculo branco central -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,16a38,38 0 1,0 0,76a38,38 0 1,0 0,-76z"/>
+    <!-- “P” estilizado (só pra ter algo visível) -->
+    <path
+        android:fillColor="#2E7D32"
+        android:pathData="M40,32h22c8,0 14,6 14,14s-6,14 -14,14h-10v16h-12zM52,46h10c3.3,0 6,-2.7 6,-6s-2.7,-6 -6,-6h-10z"/>
+</vector>
