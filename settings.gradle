@@ -6,4 +6,4 @@ dependencyResolutionManagement {
   repositories { google(); mavenCentral() }
 }
 rootProject.name = "ProDestinoWebView"
-include(":app")
+include(":app")   // se o módulo tiver outro nome, troque aqui
