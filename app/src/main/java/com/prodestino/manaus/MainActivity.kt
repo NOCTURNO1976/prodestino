@@ -1,71 +1,84 @@
 package com.prodestino.manaus
 
-import android.Manifest
-import android.net.Uri
-import android.os.Build
+import android.annotation.SuppressLint
 import android.os.Bundle
-import android.webkit.*
-import androidx.activity.result.contract.ActivityResultContracts
+import android.webkit.GeolocationPermissions
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
-import androidx.core.content.PermissionChecker
-import com.prodestino.manaus.databinding.ActivityMainBinding
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var binding: ActivityMainBinding
-    private var pendingFilePathCallback: ValueCallback<Array<Uri>>? = null
+    private lateinit var webview: WebView
 
-    private val askPerms = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { /* noop */ }
-
-    private val openFiles = registerForActivityResult(
-        ActivityResultContracts.GetMultipleContents()
-    ) { uris ->
-        val cb = pendingFilePathCallback
-        pendingFilePathCallback = null
-        cb?.onReceiveValue(uris?.toTypedArray() ?: emptyArray())
-    }
-
+    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        binding = ActivityMainBinding.inflate(layoutInflater)
-        setContentView(binding.root)
+        enableEdgeToEdge()
+        setContentView(R.layout.activity_main)
 
-        if (BuildConfig.WEBVIEW_DEBUG) WebView.setWebContentsDebuggingEnabled(true)
+        webview = findViewById(R.id.webview)
 
-        askPerms.launch(arrayOf(
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.CAMERA,
-            Manifest.permission.RECORD_AUDIO
-        ))
+        // Configura WebView
+        with(webview.settings) {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            databaseEnabled = true
+            setGeolocationEnabled(true)
+            mediaPlaybackRequiresUserGesture = false
+            cacheMode = WebSettings.LOAD_DEFAULT
+            // Se for usar HTTP em dev, depois ativamos networkSecurityConfig no Manifest.
+            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+        }
 
-        setupWebView()
-        binding.webView.loadUrl("https://manaus.prodestino.com/")
-    }
-
-    private fun setupWebView() = with(binding.webView) {
-        webViewClient = object : WebViewClient() {
-            override fun shouldOverrideUrlLoading(view: WebView, req: WebResourceRequest): Boolean {
-                view.loadUrl(req.url.toString()); return true
+        webview.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(
+                view: WebView?,
+                request: WebResourceRequest?
+            ): Boolean {
+                // Mantém navegação dentro do WebView
+                return false
             }
         }
-        webChromeClient = object : WebChromeClient() {
 
-            override fun onGeolocationPermissionsShowPrompt(origin: String?, callback: GeolocationPermissions.Callback) {
-                val ok = hasPerm(Manifest.permission.ACCESS_FINE_LOCATION) || hasPerm(Manifest.permission.ACCESS_COARSE_LOCATION)
-                callback.invoke(origin, ok, false)
+        webview.webChromeClient = object : WebChromeClient() {
+            override fun onGeolocationPermissionsShowPrompt(
+                origin: String?,
+                callback: GeolocationPermissions.Callback?
+            ) {
+                // Concede geolocalização ao WebView (já temos permissões no Manifest)
+                callback?.invoke(origin, true, false)
             }
 
-            override fun onPermissionRequest(request: PermissionRequest?) {
-                request ?: return
-                val allow = request.resources.all {
-                    when (it) {
-                        PermissionRequest.RESOURCE_AUDIO_CAPTURE -> hasPerm(Manifest.permission.RECORD_AUDIO)
-                        PermissionRequest.RESOURCE_VIDEO_CAPTURE -> hasPerm(Manifest.permission.CAMERA)
-                        else -> true
-                    }
-                }
-                if (allow) request.grant(request.resources) else request.deny()
+            // Camera/microfone via WebRTC: permissões já no Manifest; o Android 12+ pedirá runtime no navegador.
+            // Para upload/chooser avançado, podemos adicionar onShowFileChooser depois.
+        }
+
+        // URL inicial
+        if (savedInstanceState == null) {
+            webview.loadUrl("https://manaus.prodestino.com/")
+        }
+    }
+
+    override fun onBackPressed() {
+        if (this::webview.isInitialized && webview.canGoBack()) {
+            webview.goBack()
+        } else {
+            super.onBackPressed()
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        if (this::webview.isInitialized) webview.saveState(outState)
+    }
+
+    override fun onRestoreInstanceState(savedInstanceState: Bundle) {
+        super.onRestoreInstanceState(savedInstanceState)
+        if (this::webview.isInitialized) webview.restoreState(savedInstanceState)
+    }
+}
