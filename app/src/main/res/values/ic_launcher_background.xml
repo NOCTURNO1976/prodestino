@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Cor de fundo do ícone (pode trocar depois) -->
+    <color name="ic_launcher_background">#2E7D32</color>
+</resources>
