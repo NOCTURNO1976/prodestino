@@ -1,4 +1,4 @@
-// app/build.gradle  (MÓDULO)
+// app/build.gradle  (MÓDULO :app)
 plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
@@ -16,8 +16,15 @@ android {
         versionName "1.0"
     }
 
+    // 🔧 HABILITA a geração de BuildConfig e o ViewBinding
+    buildFeatures {
+        buildConfig true
+        viewBinding true
+    }
+
     buildTypes {
         debug {
+            // usa BuildConfig.DEBUG se quiser, mas estes campos personalizados funcionam
             buildConfigField "boolean", "WEBVIEW_DEBUG", "true"
         }
         release {
@@ -27,8 +34,6 @@ android {
             buildConfigField "boolean", "WEBVIEW_DEBUG", "false"
         }
     }
-
-    buildFeatures { viewBinding true }
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
