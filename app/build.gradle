@@ -9,14 +9,14 @@ android {
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.prodestino.sidaf01"
+        applicationId "com.prodestino.pro01"
         minSdk 24
         targetSdk 34
         versionCode 1
         versionName "1.0"
 
         // URL que o app abre (mude aqui se precisar)
-        buildConfigField "String", "BASE_URL", "\"https://sidaf.online/\""
+        buildConfigField "String", "BASE_URL", "\"https://manaus.prodestino.com/\""
     }
 
     buildFeatures {
