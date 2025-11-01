@@ -9,13 +9,12 @@ android {
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.prodestino.pro01"   // mantém diferente do SIDAF
+        applicationId "com.prodestino.pro01"   // diferente do SIDAF
         minSdk 24
         targetSdk 34
         versionCode 1
         versionName "1.0"
 
-        // URL base do app (use barra final se sua home precisar)
         buildConfigField "String", "BASE_URL", "\"https://manaus.prodestino.com/\""
     }
 
@@ -24,7 +23,7 @@ android {
         viewBinding true
     }
 
-    // === Assinatura (opcional) ===
+    // Assinatura opcional via signing.properties
     def props = new Properties()
     def propsFile = file("signing.properties")
     if (propsFile.exists()) {
@@ -51,9 +50,7 @@ android {
             minifyEnabled false
             shrinkResources false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            if (props.size() > 0) {
-                signingConfig signingConfigs.release
-            }
+            if (props.size() > 0) signingConfig signingConfigs.release
         }
     }
 
@@ -63,9 +60,7 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
 
-    packaging {
-        resources.excludes += ["/META-INF/{AL2.0,LGPL2.1}"]
-    }
+    packaging { resources.excludes += ["/META-INF/{AL2.0,LGPL2.1}"] }
 }
 
 dependencies {
