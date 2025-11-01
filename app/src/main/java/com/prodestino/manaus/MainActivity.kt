@@ -4,11 +4,14 @@ package com.prodestino.manaus
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
-import android.net.Uri
+import android.net.*
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import android.view.WindowManager
 import android.webkit.*
@@ -30,9 +33,10 @@ class MainActivity : ComponentActivity() {
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private var cameraUri: Uri? = null
 
-    private val allowedHosts = setOf(
-        Uri.parse(BuildConfig.BASE_URL).host,  // sidaf.online
-        "www.sidaf.online"
+    // Domínios que o WebView pode manter "dentro do app"
+    private val allowedHosts = setOfNotNull(
+        Uri.parse(BuildConfig.BASE_URL).host,       // ex.: manaus.prodestino.com
+        "manaus.prodestino.com"
     )
 
     private val askPerms = registerForActivityResult(
@@ -58,11 +62,14 @@ class MainActivity : ComponentActivity() {
         cameraUri = null
     }
 
+    private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
+    private val homeUrl by lazy { BuildConfig.BASE_URL } // mantenha BASE_URL com seu path inicial
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // 🔒 Anti-print: bloqueia screenshot e gravação de tela (app inteiro)
+        // 🔒 Anti-print: bloqueia screenshot e gravação de tela
         window.setFlags(
             WindowManager.LayoutParams.FLAG_SECURE,
             WindowManager.LayoutParams.FLAG_SECURE
@@ -72,7 +79,7 @@ class MainActivity : ComponentActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        // 🧱 Imersivo: esconde status bar + barra de navegação (voltam por gesto)
+        // 🧱 Imersivo
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val insets = WindowInsetsControllerCompat(window, binding.root)
         insets.hide(WindowInsetsCompat.Type.systemBars())
@@ -83,29 +90,62 @@ class MainActivity : ComponentActivity() {
         with(wv.settings) {
             javaScriptEnabled = true
             domStorageEnabled = true
+            databaseEnabled = true
             mediaPlaybackRequiresUserGesture = false
             allowFileAccess = true
             allowContentAccess = true
+            cacheMode = WebSettings.LOAD_DEFAULT
             mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-            if (BuildConfig.WEBVIEW_DEBUG) WebView.setWebContentsDebuggingEnabled(true)
+        }
+        // Cookies de sessão (PHP)
+        CookieManager.getInstance().apply {
+            setAcceptCookie(true)
+            setAcceptThirdPartyCookies(wv, true)
         }
 
         wv.webViewClient = object : WebViewClient() {
+
             override fun shouldOverrideUrlLoading(
                 view: WebView, request: WebResourceRequest
             ): Boolean {
                 val h = request.url.host ?: return false
-                // abre dentro do app se for o mesmo domínio; externos vão para o navegador
                 return if (allowedHosts.contains(h)) {
+                    // abre dentro do app
                     false
                 } else {
+                    // externos → navegador
                     startActivity(Intent(Intent.ACTION_VIEW, request.url))
                     true
                 }
             }
 
-            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                super.onPageStarted(view, url, favicon)
+            // Intercepta erros genéricos (DNS/timeout/aborted/etc.)
+            override fun onReceivedError(
+                view: WebView, request: WebResourceRequest, error: WebResourceError
+            ) {
+                if (request.isForMainFrame) {
+                    view.loadUrl("file:///android_asset/offline.html")
+                    scheduleAutoRetry()
+                }
+            }
+
+            // Intercepta HTTP 4xx/5xx
+            override fun onReceivedHttpError(
+                view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse
+            ) {
+                if (request.isForMainFrame) {
+                    view.loadUrl("file:///android_asset/offline.html")
+                    scheduleAutoRetry()
+                }
+            }
+
+            // Intercepta problemas de SSL sem expor a URL
+            override fun onReceivedSslError(
+                view: WebView, handler: SslErrorHandler, error: SslError
+            ) {
+                handler.cancel()
+                view.loadUrl("file:///android_asset/offline.html")
+                scheduleAutoRetry()
             }
         }
 
@@ -136,17 +176,15 @@ class MainActivity : ComponentActivity() {
                 filePathCallback: ValueCallback<Array<Uri>>?,
                 fileChooserParams: FileChooserParams?
             ): Boolean {
-                fileCallback?.onReceiveValue(emptyArray()) // limpa qualquer callback anterior
+                fileCallback?.onReceiveValue(emptyArray()) // limpa callback anterior
                 fileCallback = filePathCallback
 
-                // Intent para escolher arquivo da galeria
                 val contentIntent = Intent(Intent.ACTION_GET_CONTENT).apply {
                     addCategory(Intent.CATEGORY_OPENABLE)
                     type = "*/*"
                     putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "video/*"))
                 }
 
-                // Intent para câmera (foto)
                 val photoFile = createTempImageFile()
                 cameraUri = FileProvider.getUriForFile(
                     this@MainActivity,
@@ -173,7 +211,19 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // pede permissões Android (uma vez)
+        // Observa rede para tentar voltar automaticamente da tela offline
+        val cmgr = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        cmgr.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                runOnUiThread {
+                    if (wv.url?.startsWith("file:///android_asset/offline.html") == true) {
+                        wv.loadUrl(homeUrl)
+                    }
+                }
+            }
+        })
+
+        // Pede permissões Android (uma vez)
         askPerms.launch(arrayOf(
             Manifest.permission.CAMERA,
             Manifest.permission.RECORD_AUDIO,
@@ -181,8 +231,18 @@ class MainActivity : ComponentActivity() {
             Manifest.permission.ACCESS_FINE_LOCATION
         ))
 
-        // carrega o site
-        wv.loadUrl(BuildConfig.BASE_URL)
+        // Carrega a home
+        wv.loadUrl(homeUrl)
+    }
+
+    private fun scheduleAutoRetry() {
+        // pequeno debounce para não “martelar” a cada erro
+        mainHandler.removeCallbacksAndMessages(null)
+        mainHandler.postDelayed({
+            if (!isFinishing && !isDestroyed) {
+                binding.webview.loadUrl(homeUrl)
+            }
+        }, 3500L)
     }
 
     private fun createTempImageFile(): File {
@@ -196,7 +256,7 @@ class MainActivity : ComponentActivity() {
         if (wv.canGoBack()) wv.goBack() else super.onBackPressed()
     }
 
-    // Mantém as barras ocultas quando o app volta ao foco (imersivo)
+    // Mantém imersivo ao voltar foco
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) {
