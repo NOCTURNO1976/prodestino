@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">localhost</domain>
-        <domain includeSubdomains="true">10.0.2.2</domain>
+    <!-- Produção: NUNCA permitir HTTP -->
+    <base-config cleartextTrafficPermitted="false" />
+
+    <!-- Seu domínio (HTTPS). Não libera HTTP. -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">manaus.prodestino.com</domain>
     </domain-config>
-    <base-config cleartextTrafficPermitted="false"/>
 </network-security-config>
