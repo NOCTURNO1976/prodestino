@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.*
+import android.net.http.SslError              // <<<<<< IMPORT NECESSÁRIO
 import android.os.*
 import android.provider.MediaStore
 import android.view.WindowManager
@@ -30,7 +31,6 @@ class MainActivity : ComponentActivity() {
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private var cameraUri: Uri? = null
 
-    // Domínios que o WebView mantém "dentro do app"
     private val allowedHosts = setOfNotNull(
         Uri.parse(BuildConfig.BASE_URL).host,
         "manaus.prodestino.com"
@@ -60,13 +60,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
-    private val homeUrl by lazy { BuildConfig.BASE_URL } // sua home/base
+    private val homeUrl by lazy { BuildConfig.BASE_URL }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // 🔒 Anti-print
+        // Anti-print
         window.setFlags(
             WindowManager.LayoutParams.FLAG_SECURE,
             WindowManager.LayoutParams.FLAG_SECURE
@@ -76,7 +76,7 @@ class MainActivity : ComponentActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        // 🧱 Imersivo
+        // Imersivo
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val insets = WindowInsetsControllerCompat(window, binding.root)
         insets.hide(WindowInsetsCompat.Type.systemBars())
@@ -109,14 +109,13 @@ class MainActivity : ComponentActivity() {
             ): Boolean {
                 val h = request.url.host ?: return false
                 return if (allowedHosts.contains(h)) {
-                    false  // dentro do app
+                    false
                 } else {
                     startActivity(Intent(Intent.ACTION_VIEW, request.url))
-                    true   // externos → navegador
+                    true
                 }
             }
 
-            // Erros de rede (DNS/timeout/aborted/etc.)
             override fun onReceivedError(
                 view: WebView, request: WebResourceRequest, error: WebResourceError
             ) {
@@ -126,7 +125,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            // HTTP 4xx/5xx
             override fun onReceivedHttpError(
                 view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse
             ) {
@@ -136,7 +134,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            // SSL/TLS
             override fun onReceivedSslError(
                 view: WebView, handler: SslErrorHandler, error: SslError
             ) {
@@ -147,7 +144,6 @@ class MainActivity : ComponentActivity() {
         }
 
         wv.webChromeClient = object : WebChromeClient() {
-            // Câmera/microfone
             override fun onPermissionRequest(request: PermissionRequest?) {
                 runOnUiThread {
                     val host = request?.origin?.host
@@ -157,7 +153,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            // Geolocalização
             override fun onGeolocationPermissionsShowPrompt(
                 origin: String?, callback: GeolocationPermissions.Callback?
             ) {
@@ -165,7 +160,6 @@ class MainActivity : ComponentActivity() {
                 callback?.invoke(origin, host != null && allowedHosts.contains(host), false)
             }
 
-            // <input type="file">
             override fun onShowFileChooser(
                 webView: WebView?, filePathCallback: ValueCallback<Array<Uri>>?,
                 fileChooserParams: FileChooserParams?
@@ -205,7 +199,7 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Auto-retry quando a rede voltar
+        // Volta automático quando a rede reaparece
         val cmgr = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         cmgr.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
@@ -217,7 +211,6 @@ class MainActivity : ComponentActivity() {
             }
         })
 
-        // Permissões Android
         askPerms.launch(arrayOf(
             Manifest.permission.CAMERA,
             Manifest.permission.RECORD_AUDIO,
@@ -225,7 +218,6 @@ class MainActivity : ComponentActivity() {
             Manifest.permission.ACCESS_FINE_LOCATION
         ))
 
-        // Carrega a home
         wv.loadUrl(homeUrl)
     }
 
