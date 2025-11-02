@@ -21,17 +21,7 @@ import android.os.PowerManager
 import android.provider.MediaStore
 import android.provider.Settings
 import android.view.WindowManager
-import android.webkit.GeolocationPermissions
-import android.webkit.PermissionRequest
-import android.webkit.SslErrorHandler
-import android.webkit.ValueCallback
-import android.webkit.WebChromeClient
-import android.webkit.WebResourceError
-import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
+import android.webkit.*
 import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -94,25 +84,15 @@ class MainActivity : ComponentActivity() {
             requestBackgroundIfNeeded()
             requestPostNotificationsIfNeeded()
             maybeStartLocationService()
-            // Sugestão: oferecer whitelisting de bateria após iniciar o serviço
-            maybePromptBatteryOptimization()
+            // Não chamamos optimizeBattery aqui — deixamos para o usuário pedir via botão do site.
         }
     }
 
     private val reqBackgroundLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (!granted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // Android 11+: muitas vezes só via Configurações se consegue "Sempre permitir"
-            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                data = Uri.fromParts("package", packageName, null)
-            }
-            startActivity(intent)
-        }
+    ) {
         // Inicia serviço mesmo que o usuário ainda não tenha marcado "Sempre permitir".
         maybeStartLocationService()
-        // Oferecer whitelisting de bateria
-        maybePromptBatteryOptimization()
     }
 
     private val reqNotifLauncher = registerForActivityResult(
@@ -159,7 +139,6 @@ class MainActivity : ComponentActivity() {
             requestBackgroundIfNeeded()
             requestPostNotificationsIfNeeded()
             maybeStartLocationService()
-            maybePromptBatteryOptimization()
         }
     }
 
@@ -181,26 +160,26 @@ class MainActivity : ComponentActivity() {
     }
     // ====== Fim: Orquestrador ======
 
-    // ====== Início: "Melhorar confiabilidade" (whitelist de bateria) ======
+    // ====== Início: "Melhorar confiabilidade" (whitelist de bateria) — chamado apenas via botão do site ======
     private fun maybePromptBatteryOptimization() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
             val ignoring = pm.isIgnoringBatteryOptimizations(packageName)
             if (!ignoring) {
                 AlertDialog.Builder(this)
-                    .setTitle("Melhorar confiabilidade")
+                    .setTitle("Melhorar funcionamento em segundo plano")
                     .setMessage(
-                        "Para manter o rastreamento ativo em segundo plano, permita que o app " +
-                        "ignore a otimização de bateria. Você pode mudar isso a qualquer momento."
+                        "Para manter o rastreamento ativo com a tela apagada, você pode permitir " +
+                        "que o app ignore a otimização de bateria. Essa permissão é opcional " +
+                        "e pode ser alterada a qualquer momento nas configurações."
                     )
-                    .setPositiveButton("Abrir ajustes") { _, _ ->
+                    .setPositiveButton("Abrir configurações") { _, _ ->
                         try {
                             val it = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
                                 data = Uri.parse("package:$packageName")
                             }
                             startActivity(it)
                         } catch (_: Exception) {
-                            // Fallback: tela geral de otimização de bateria
                             try {
                                 startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
                             } catch (_: Exception) { /* ignora */ }
@@ -212,6 +191,25 @@ class MainActivity : ComponentActivity() {
         }
     }
     // ====== Fim: "Melhorar confiabilidade" ======
+
+    // ====== Início: Bridge JS → Android (não agressivo; chamado pelo seu site) ======
+    private inner class AppBridge(private val ctx: Context) {
+
+        @JavascriptInterface
+        fun startBackgroundTracking() {
+            runOnUiThread { 
+                requestFineCoarseIfNeeded() // garante permissões e liga o serviço
+            }
+        }
+
+        @JavascriptInterface
+        fun optimizeBattery() {
+            runOnUiThread {
+                maybePromptBatteryOptimization() // só abre se o usuário pediu
+            }
+        }
+    }
+    // ====== Fim: Bridge ======
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -245,13 +243,16 @@ class MainActivity : ComponentActivity() {
             cacheMode = WebSettings.LOAD_DEFAULT
             mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
         }
-        android.webkit.CookieManager.getInstance().apply {
+        CookieManager.getInstance().apply {
             setAcceptCookie(true)
             setAcceptThirdPartyCookies(wv, true)
         }
         if (BuildConfig.WEBVIEW_DEBUG) {
             WebView.setWebContentsDebuggingEnabled(true)
         }
+
+        // >>> Bridge disponível como window.AndroidApp <<<
+        wv.addJavascriptInterface(AppBridge(this), "AndroidApp")
 
         wv.webViewClient = object : WebViewClient() {
 
