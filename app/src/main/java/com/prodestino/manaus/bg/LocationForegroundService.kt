@@ -66,6 +66,17 @@ class LocationForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        // Se o usuário limpar o app recente, tenta reerguer o serviço
+        val it = Intent(applicationContext, LocationForegroundService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            applicationContext.startForegroundService(it)
+        } else {
+            applicationContext.startService(it)
+        }
+    }
+
     override fun onDestroy() {
         stopLocationUpdates()
         super.onDestroy()
