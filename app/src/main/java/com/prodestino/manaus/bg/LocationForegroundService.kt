@@ -16,11 +16,7 @@ import android.os.IBinder
 import android.webkit.CookieManager
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-import com.google.android.gms.location.LocationCallback
-import com.google.android.gms.location.LocationRequest
-import com.google.android.gms.location.LocationResult
-import com.google.android.gms.location.LocationServices
-import com.google.android.gms.location.Priority
+import com.google.android.gms.location.*
 import com.prodestino.manaus.BuildConfig
 import okhttp3.FormBody
 import okhttp3.OkHttpClient
@@ -34,6 +30,14 @@ class LocationForegroundService : Service() {
         const val CHANNEL_ID = "pd_location_channel"
         const val CHANNEL_NAME = "Rastreamento em andamento"
         const val NOTIF_ID = 1001
+
+        private const val PREFS = "pd_prefs"
+        private const val KEY_ROLE = "role"         // "driver" | "passenger" | "unknown"
+        private const val KEY_FAILS = "auth_fails"  // contador de 401/403
+        private const val ROLE_UNKNOWN = "unknown"
+        private const val ROLE_DRIVER = "driver"
+        private const val ROLE_PASSENGER = "passenger"
+        private const val AUTH_FAIL_LIMIT = 5
     }
 
     private val http by lazy {
@@ -60,9 +64,7 @@ class LocationForegroundService : Service() {
         startLocationUpdates()
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        return START_STICKY
-    }
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
 
     override fun onDestroy() {
         stopLocationUpdates()
@@ -74,20 +76,14 @@ class LocationForegroundService : Service() {
     private fun createChannelIfNeeded() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val nm = getSystemService(NotificationManager::class.java)
-            val ch = NotificationChannel(
-                CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_LOW
-            )
+            val ch = NotificationChannel(CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_LOW)
             nm?.createNotificationChannel(ch)
         }
     }
 
     private fun hasLocationPermission(): Boolean {
-        val fine = ContextCompat.checkSelfPermission(
-            this, Manifest.permission.ACCESS_FINE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
-        val coarse = ContextCompat.checkSelfPermission(
-            this, Manifest.permission.ACCESS_COARSE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
+        val fine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val coarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
         return fine || coarse
     }
 
@@ -97,8 +93,7 @@ class LocationForegroundService : Service() {
             return
         }
 
-        // Intervalos equilibrados: ajuste conforme sua necessidade real
-        val req: LocationRequest = LocationRequest.Builder(15_000L)
+        val req = LocationRequest.Builder(15_000L) // 15s
             .setMinUpdateIntervalMillis(5_000L)
             .setMaxUpdateDelayMillis(30_000L)
             .setPriority(Priority.PRIORITY_BALANCED_POWER_ACCURACY)
@@ -106,7 +101,7 @@ class LocationForegroundService : Service() {
 
         callback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
-                for (loc in result.locations) sendLocation(loc)
+                for (loc in result.locations) handleLocation(loc)
             }
         }
 
@@ -118,50 +113,122 @@ class LocationForegroundService : Service() {
         callback = null
     }
 
-    private fun sendLocation(loc: Location) {
-        val accuracy = if (loc.hasAccuracy()) loc.accuracy.toDouble() else 9999.0
-        if (accuracy > 150.0) return  // filtro anti-ruído simples
+    // ======= Autodetect + cache =======
+    private fun getRole(): String {
+        val sp = getSharedPreferences(PREFS, MODE_PRIVATE)
+        return sp.getString(KEY_ROLE, ROLE_UNKNOWN) ?: ROLE_UNKNOWN
+    }
+    private fun setRole(role: String) {
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_ROLE, role).apply()
+        // zera falhas ao fixar papel
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putInt(KEY_FAILS, 0).apply()
+    }
+    private fun incAuthFail() {
+        val sp = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val cur = sp.getInt(KEY_FAILS, 0) + 1
+        sp.edit().putInt(KEY_FAILS, cur).apply()
+        if (cur >= AUTH_FAIL_LIMIT) {
+            // Perdeu sessão: zera papel para reaprender
+            sp.edit().putString(KEY_ROLE, ROLE_UNKNOWN).putInt(KEY_FAILS, 0).apply()
+        }
+    }
+    private fun resetAuthFail() {
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putInt(KEY_FAILS, 0).apply()
+    }
+    // ================================
 
-        // === Payload com os MESMOS campos que seu backend já usa ===
-        // Ajuste os nomes abaixo se seu endpoint espera chaves diferentes.
+    private fun handleLocation(loc: Location) {
+        val accuracy = if (loc.hasAccuracy()) loc.accuracy.toDouble() else 9999.0
+        if (accuracy > 150.0) return // filtro anti-ruído simples
+
         val body = FormBody.Builder()
             .add("latitude", loc.latitude.toString())
             .add("longitude", loc.longitude.toString())
-            .add("timestamp", (System.currentTimeMillis() / 1000L).toString()) // epoch (s) — ajuste se necessário
-            // opcionais (se o backend aceitar, mantém; senão, remova)
+            .add("timestamp", (System.currentTimeMillis() / 1000L).toString())
             .add("accuracy", accuracy.toString())
-            .add("speed", (if (loc.hasSpeed()) loc.speed else 0f).toString())        // m/s
-            .add("bearing", (if (loc.hasBearing()) loc.bearing else 0f).toString())  // graus
+            .add("speed", (if (loc.hasSpeed()) loc.speed else 0f).toString())
+            .add("bearing", (if (loc.hasBearing()) loc.bearing else 0f).toString())
             .build()
 
-        val cookieHeader = getSessionCookieHeader(BuildConfig.LOCATION_POST_URL)
+        val role = getRole()
+        when (role) {
+            ROLE_DRIVER -> postTo(BuildConfig.LOCATION_POST_URL_DRIVER, body, expectHeader = "X-Debug-Motorista")
+            ROLE_PASSENGER -> postTo(BuildConfig.LOCATION_POST_URL_PASSENGER, body, expectHeader = "X-Debug-Passageiro")
+            else -> autodetectAndPost(body)
+        }
+    }
 
+    private fun autodetectAndPost(body: FormBody) {
+        // 1) Tenta motorista
+        val okDriver = postTo(
+            BuildConfig.LOCATION_POST_URL_DRIVER,
+            body,
+            expectHeader = "X-Debug-Motorista",
+            tryFixRole = true
+        )
+        if (okDriver) return
+
+        // 2) Tenta passageiro
+        postTo(
+            BuildConfig.LOCATION_POST_URL_PASSENGER,
+            body,
+            expectHeader = "X-Debug-Passageiro",
+            tryFixRole = true
+        )
+    }
+
+    /**
+     * Faz o POST para url; se expectHeader estiver presente e >0, considera reconhecido.
+     * Se tryFixRole=true e reconhecido, fixa o papel correspondente.
+     *
+     * Retorna true se houve sucesso e (quando aplicável) reconhecimento do papel.
+     */
+    private fun postTo(
+        url: String,
+        body: FormBody,
+        expectHeader: String,
+        tryFixRole: Boolean = false
+    ): Boolean {
+        val cookieHeader = getSessionCookieHeader(url)
         val req = Request.Builder()
-            .url(BuildConfig.LOCATION_POST_URL)
+            .url(url)
             .post(body)
             .apply { if (cookieHeader != null) header("Cookie", cookieHeader) }
             .header("Accept", "application/json")
             .build()
 
-        sendWithRetry(req, 2)
-    }
-
-    private fun sendWithRetry(request: Request, retries: Int) {
+        // duas tentativas com backoff
         var attempt = 0
         var backoffMs = 500L
-        while (attempt <= retries) {
+        while (attempt <= 2) {
             try {
-                http.newCall(request).execute().use { resp ->
-                    if (resp.isSuccessful) return
+                http.newCall(req).execute().use { resp ->
+                    val code = resp.code
+                    if (code == 401 || code == 403) {
+                        incAuthFail(); return false
+                    }
+                    if (resp.isSuccessful) {
+                        resetAuthFail()
+                        val hdr = resp.header(expectHeader)?.trim()
+                        val hdrOk = hdr?.toIntOrNull()?.let { it > 0 } ?: false
+                        if (tryFixRole && hdrOk) {
+                            if (expectHeader == "X-Debug-Motorista") setRole(ROLE_DRIVER)
+                            if (expectHeader == "X-Debug-Passageiro") setRole(ROLE_PASSENGER)
+                        }
+                        // Sucesso (mesmo que header não venha, consideramos entregue)
+                        return true
+                    }
                 }
-            } catch (_: Throwable) { /* retry */ }
+            } catch (_: Throwable) {
+                // ignora; fará retry
+            }
             attempt++
-            if (attempt <= retries) {
+            if (attempt <= 2) {
                 try { Thread.sleep(backoffMs) } catch (_: InterruptedException) {}
                 backoffMs = max(backoffMs * 3 / 2, 800L)
             }
         }
-        // Após retries, mantém serviço vivo e segue — sem travar
+        return false
     }
 
     private fun getSessionCookieHeader(postUrl: String): String? {
