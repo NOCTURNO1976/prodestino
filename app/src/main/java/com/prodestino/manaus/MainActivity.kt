@@ -6,16 +6,34 @@ import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
-import android.net.*
-import android.net.http.SslError              // <<<<<< IMPORT NECESSÁRIO
-import android.os.*
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.Uri
+import android.net.http.SslError
+import android.os.Build
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
+import android.provider.Settings
 import android.view.WindowManager
-import android.webkit.*
+import android.webkit.GeolocationPermissions
+import android.webkit.PermissionRequest
+import android.webkit.SslErrorHandler
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -23,7 +41,8 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.prodestino.manaus.databinding.ActivityMainBinding
 import java.io.File
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Date
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
 
@@ -36,6 +55,7 @@ class MainActivity : ComponentActivity() {
         "manaus.prodestino.com"
     )
 
+    // Mantemos apenas CÂMERA/ÁUDIO aqui. Localização será pedida no fluxo 2-passos abaixo.
     private val askPerms = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { /* ok */ }
@@ -61,6 +81,99 @@ class MainActivity : ComponentActivity() {
 
     private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
     private val homeUrl by lazy { BuildConfig.BASE_URL }
+
+    // ====== Início: Orquestrador de permissões localização/notificação ======
+    private val reqFineCoarseLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        val fineOk = grants[Manifest.permission.ACCESS_FINE_LOCATION] == true
+        val coarseOk = grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (fineOk || coarseOk) {
+            requestBackgroundIfNeeded()
+            requestPostNotificationsIfNeeded()
+            maybeStartLocationService()
+        }
+    }
+
+    private val reqBackgroundLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (!granted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // Android 11+: muitas vezes só via Configurações se consegue "Sempre permitir"
+            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.fromParts("package", packageName, null)
+            }
+            startActivity(intent)
+        }
+        // Inicia serviço mesmo que o usuário ainda não tenha marcado "Sempre permitir".
+        // (O serviço continuará rodando; a precisão em 2º plano pode variar até ele ajustar.)
+        maybeStartLocationService()
+    }
+
+    private val reqNotifLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* sem ação obrigatória */ }
+
+    private fun requestPostNotificationsIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(
+                    this, Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                reqNotifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
+
+    private fun requestBackgroundIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val bgGranted = ContextCompat.checkSelfPermission(
+                this, Manifest.permission.ACCESS_BACKGROUND_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!bgGranted) {
+                reqBackgroundLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+            }
+        }
+    }
+
+    private fun requestFineCoarseIfNeeded() {
+        val needFine = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.ACCESS_FINE_LOCATION
+        ) != PackageManager.PERMISSION_GRANTED
+        val needCoarse = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.ACCESS_COARSE_LOCATION
+        ) != PackageManager.PERMISSION_GRANTED
+
+        if (needFine || needCoarse) {
+            reqFineCoarseLauncher.launch(arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ))
+        } else {
+            // Já tem "enquanto em uso"
+            requestBackgroundIfNeeded()
+            requestPostNotificationsIfNeeded()
+            maybeStartLocationService()
+        }
+    }
+
+    private fun maybeStartLocationService() {
+        val fine = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val coarse = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        if (fine || coarse) {
+            val it = Intent(this, com.prodestino.manaus.bg.LocationForegroundService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(it)
+            } else {
+                startService(it)
+            }
+        }
+    }
+    // ====== Fim: Orquestrador ======
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -94,7 +207,7 @@ class MainActivity : ComponentActivity() {
             cacheMode = WebSettings.LOAD_DEFAULT
             mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
         }
-        CookieManager.getInstance().apply {
+        android.webkit.CookieManager.getInstance().apply {
             setAcceptCookie(true)
             setAcceptThirdPartyCookies(wv, true)
         }
@@ -211,12 +324,14 @@ class MainActivity : ComponentActivity() {
             }
         })
 
+        // Pede apenas CÂMERA/ÁUDIO aqui (mantém seu fluxo).
         askPerms.launch(arrayOf(
             Manifest.permission.CAMERA,
-            Manifest.permission.RECORD_AUDIO,
-            Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.ACCESS_FINE_LOCATION
+            Manifest.permission.RECORD_AUDIO
         ))
+
+        // Fluxo 2-passos de localização (uso → background) + notificações
+        requestFineCoarseIfNeeded()
 
         wv.loadUrl(homeUrl)
     }
@@ -249,5 +364,11 @@ class MainActivity : ComponentActivity() {
             insets.systemBarsBehavior =
                 WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Reforça que o serviço esteja ativo quando a Activity voltar
+        maybeStartLocationService()
     }
 }
