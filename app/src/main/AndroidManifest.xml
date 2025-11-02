@@ -1,16 +1,14 @@
 <!-- app/src/main/AndroidManifest.xml -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Permissões -->
+    <!-- ===== Permissões base do seu app ===== -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
-   
-    
-    <!-- ==== INÍCIO: Permissões para rastreamento contínuo ==== -->
+
+    <!-- ===== Rastreamento contínuo (Android) ===== -->
+    <!-- Precisão/uso em primeiro plano -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <!-- Android 10+ (Q): localização em segundo plano -->
@@ -20,12 +18,8 @@
     <!-- Serviços em primeiro plano -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
-    <!-- ==== FIM: Permissões ==== -->
 
-
-   
-
-    <!-- Features opcionais -->
+    <!-- Recursos (não obrigatórios) -->
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
     <uses-feature android:name="android.hardware.microphone" android:required="false"/>
 
@@ -61,5 +55,10 @@
             </intent-filter>
         </activity>
 
+        <!-- Service de localização em primeiro plano -->
+        <service
+            android:name=".bg.LocationForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
     </application>
 </manifest>
