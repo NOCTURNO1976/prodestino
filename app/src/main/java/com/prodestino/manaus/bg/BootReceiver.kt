@@ -1,3 +1,4 @@
+// app/src/main/java/com/prodestino/manaus/bg/BootReceiver.kt
 package com.prodestino.manaus.bg
 
 import android.content.BroadcastReceiver
