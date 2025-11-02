@@ -104,7 +104,7 @@ class LocationForegroundService : Service() {
             return
         }
 
-        val req = LocationRequest.Builder(15_000L) // 15s
+        val req = LocationRequest.Builder(15_000L) // ~15s
             .setMinUpdateIntervalMillis(5_000L)
             .setMaxUpdateDelayMillis(30_000L)
             .setPriority(Priority.PRIORITY_BALANCED_POWER_ACCURACY)
@@ -189,10 +189,9 @@ class LocationForegroundService : Service() {
     }
 
     /**
-     * Faz o POST para url; se expectHeader estiver presente e >0, considera reconhecido.
-     * Se tryFixRole=true e reconhecido, fixa o papel correspondente.
-     *
-     * Retorna true se houve sucesso e (quando aplicável) reconhecimento do papel.
+     * GATE POR SESSÃO (Opção A):
+     * - Se ainda não houver cookie de sessão do seu domínio, NÃO posta (evita 401/403 e lock).
+     * - Quando o usuário abrir o site no WebView e o cookie existir, os envios começam normalmente.
      */
     private fun postTo(
         url: String,
@@ -201,11 +200,17 @@ class LocationForegroundService : Service() {
         tryFixRole: Boolean = false
     ): Boolean {
         val cookieHeader = getSessionCookieHeader(url)
+
+        // >>> Gate por sessão: sem cookie, não envia ainda <<<
+        if (cookieHeader.isNullOrBlank()) {
+            return false
+        }
+
         val req = Request.Builder()
             .url(url)
             .post(body)
-            .apply { if (cookieHeader != null) header("Cookie", cookieHeader) }
             .header("Accept", "application/json")
+            .header("Cookie", cookieHeader)
             .build()
 
         // duas tentativas com backoff
@@ -226,7 +231,6 @@ class LocationForegroundService : Service() {
                             if (expectHeader == "X-Debug-Motorista") setRole(ROLE_DRIVER)
                             if (expectHeader == "X-Debug-Passageiro") setRole(ROLE_PASSENGER)
                         }
-                        // Sucesso (mesmo que header não venha, consideramos entregue)
                         return true
                     }
                 }
