@@ -1,30 +1,17 @@
 <!-- app/src/main/AndroidManifest.xml -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- ===== Permissões base do seu app ===== -->
+    <!-- Permissões base -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
 
-    <!-- ===== Rastreamento contínuo (Android) ===== -->
-    <!-- Precisão/uso em primeiro plano -->
+    <!-- Permissões de localização (somente para uso via WebView/geolocation do site, em primeiro plano) -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
-    <!-- Android 10+ (Q): localização em segundo plano -->
-    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
-    <!-- Android 13+ (T): para exibir a notificação do serviço -->
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-    <!-- Serviços em primeiro plano -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
-    <!-- Opcional: melhorar estabilidade em 2º plano (usuário decide no sistema) -->
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
 
-    <!-- Iniciar sozinho após reinício/atualização do app -->
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
-
-    <!-- Recursos (não obrigatórios) -->
+    <!-- Recursos (opcionais) -->
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
     <uses-feature android:name="android.hardware.microphone" android:required="false"/>
 
@@ -60,22 +47,8 @@
             </intent-filter>
         </activity>
 
-        <!-- Receiver para BOOT/UPDATE (religa o serviço em silêncio) -->
-        <receiver
-            android:name=".bg.BootReceiver"
-            android:enabled="true"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED"/>
-                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED"/>
-                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
-            </intent-filter>
-        </receiver>
+        <!-- (REMOVIDO) BootReceiver -->
+        <!-- (REMOVIDO) Service em primeiro plano de localização -->
 
-        <!-- Service de localização em primeiro plano -->
-        <service
-            android:name=".bg.LocationForegroundService"
-            android:exported="false"
-            android:foregroundServiceType="location" />
     </application>
 </manifest>
