@@ -9,18 +9,14 @@ android {
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.prodestino.pro01"   // diferente do SIDAF
+        applicationId "com.prodestino.pro01"
         minSdk 24
         targetSdk 34
         versionCode 1
         versionName "1.0"
 
-        // URL base do seu WebView (já utilizada no app)
+        // URL base do seu WebView
         buildConfigField "String", "BASE_URL", "\"https://manaus.prodestino.com/\""
-
-        // === Endpoints para autodetecção do papel ===
-        buildConfigField "String", "LOCATION_POST_URL_DRIVER", "\"https://manaus.prodestino.com/motorista/posicao_motorista.php\""
-        buildConfigField "String", "LOCATION_POST_URL_PASSENGER", "\"https://manaus.prodestino.com/passageiro/posicao_passageiro.php\""
     }
 
     buildFeatures {
@@ -78,13 +74,4 @@ dependencies {
     implementation "com.google.android.material:material:1.12.0"
     implementation "androidx.activity:activity-ktx:1.9.2"
     implementation "androidx.webkit:webkit:1.10.0"
-
-    // Localização (Fused)
-    implementation "com.google.android.gms:play-services-location:21.3.0"
-
-    // HTTP cliente
-    implementation "com.squareup.okhttp3:okhttp:4.12.0"
-
-    // WorkManager (vigilante silencioso)
-    implementation "androidx.work:work-runtime-ktx:2.9.0"
 }
