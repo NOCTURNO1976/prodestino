@@ -3,12 +3,10 @@ package com.prodestino.manaus
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.Uri
@@ -17,11 +15,20 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.os.PowerManager
 import android.provider.MediaStore
-import android.provider.Settings
 import android.view.WindowManager
-import android.webkit.*
+import android.webkit.GeolocationPermissions
+import android.webkit.PermissionRequest
+import android.webkit.SslErrorHandler
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.webkit.CookieManager
 import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -47,7 +54,7 @@ class MainActivity : ComponentActivity() {
         "manaus.prodestino.com"
     )
 
-    // Mantemos apenas CÂMERA/ÁUDIO aqui. Localização será pedida no fluxo 2-passos abaixo.
+    // Apenas CÂMERA/ÁUDIO aqui. Localização fica no fluxo 2-passos.
     private val askPerms = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { /* ok */ }
@@ -74,7 +81,7 @@ class MainActivity : ComponentActivity() {
     private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
     private val homeUrl by lazy { BuildConfig.BASE_URL }
 
-    // ====== Início: Orquestrador de permissões localização/notificação ======
+    // ====== Orquestrador de permissões (localização/notificação) ======
     private val reqFineCoarseLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { grants ->
@@ -84,20 +91,19 @@ class MainActivity : ComponentActivity() {
             requestBackgroundIfNeeded()
             requestPostNotificationsIfNeeded()
             maybeStartLocationService()
-            // Não chamamos optimizeBattery aqui — deixamos para o usuário pedir via botão do site.
         }
     }
 
     private val reqBackgroundLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) {
-        // Inicia serviço mesmo que o usuário ainda não tenha marcado "Sempre permitir".
+        // Inicia serviço mesmo que ainda não tenha “Sempre permitir”.
         maybeStartLocationService()
     }
 
     private val reqNotifLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { /* sem ação obrigatória */ }
+    ) { /* opcional */ }
 
     private fun requestPostNotificationsIfNeeded() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -135,7 +141,7 @@ class MainActivity : ComponentActivity() {
                 Manifest.permission.ACCESS_COARSE_LOCATION
             ))
         } else {
-            // Já tem "enquanto em uso"
+            // Já tem “enquanto em uso”
             requestBackgroundIfNeeded()
             requestPostNotificationsIfNeeded()
             maybeStartLocationService()
@@ -158,58 +164,7 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-    // ====== Fim: Orquestrador ======
-
-    // ====== Início: "Melhorar confiabilidade" (whitelist de bateria) — chamado apenas via botão do site ======
-    private fun maybePromptBatteryOptimization() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-            val ignoring = pm.isIgnoringBatteryOptimizations(packageName)
-            if (!ignoring) {
-                AlertDialog.Builder(this)
-                    .setTitle("Melhorar funcionamento em segundo plano")
-                    .setMessage(
-                        "Para manter o rastreamento ativo com a tela apagada, você pode permitir " +
-                        "que o app ignore a otimização de bateria. Essa permissão é opcional " +
-                        "e pode ser alterada a qualquer momento nas configurações."
-                    )
-                    .setPositiveButton("Abrir configurações") { _, _ ->
-                        try {
-                            val it = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                                data = Uri.parse("package:$packageName")
-                            }
-                            startActivity(it)
-                        } catch (_: Exception) {
-                            try {
-                                startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
-                            } catch (_: Exception) { /* ignora */ }
-                        }
-                    }
-                    .setNegativeButton("Agora não", null)
-                    .show()
-            }
-        }
-    }
-    // ====== Fim: "Melhorar confiabilidade" ======
-
-    // ====== Início: Bridge JS → Android (não agressivo; chamado pelo seu site) ======
-    private inner class AppBridge(private val ctx: Context) {
-
-        @JavascriptInterface
-        fun startBackgroundTracking() {
-            runOnUiThread { 
-                requestFineCoarseIfNeeded() // garante permissões e liga o serviço
-            }
-        }
-
-        @JavascriptInterface
-        fun optimizeBattery() {
-            runOnUiThread {
-                maybePromptBatteryOptimization() // só abre se o usuário pediu
-            }
-        }
-    }
-    // ====== Fim: Bridge ======
+    // ====== Fim orquestrador ======
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -250,9 +205,6 @@ class MainActivity : ComponentActivity() {
         if (BuildConfig.WEBVIEW_DEBUG) {
             WebView.setWebContentsDebuggingEnabled(true)
         }
-
-        // >>> Bridge disponível como window.AndroidApp <<<
-        wv.addJavascriptInterface(AppBridge(this), "AndroidApp")
 
         wv.webViewClient = object : WebViewClient() {
 
