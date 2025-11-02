@@ -8,6 +8,22 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+   
+    
+    <!-- ==== INÍCIO: Permissões para rastreamento contínuo ==== -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <!-- Android 10+ (Q): localização em segundo plano -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
+    <!-- Android 13+ (T): para exibir a notificação do serviço -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- Serviços em primeiro plano -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
+    <!-- ==== FIM: Permissões ==== -->
+
+
+   
 
     <!-- Features opcionais -->
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
