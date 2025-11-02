@@ -3,6 +3,7 @@ package com.prodestino.manaus
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -16,6 +17,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.provider.MediaStore
 import android.provider.Settings
 import android.view.WindowManager
@@ -92,6 +94,8 @@ class MainActivity : ComponentActivity() {
             requestBackgroundIfNeeded()
             requestPostNotificationsIfNeeded()
             maybeStartLocationService()
+            // Sugestão: oferecer whitelisting de bateria após iniciar o serviço
+            maybePromptBatteryOptimization()
         }
     }
 
@@ -106,8 +110,9 @@ class MainActivity : ComponentActivity() {
             startActivity(intent)
         }
         // Inicia serviço mesmo que o usuário ainda não tenha marcado "Sempre permitir".
-        // (O serviço continuará rodando; a precisão em 2º plano pode variar até ele ajustar.)
         maybeStartLocationService()
+        // Oferecer whitelisting de bateria
+        maybePromptBatteryOptimization()
     }
 
     private val reqNotifLauncher = registerForActivityResult(
@@ -154,6 +159,7 @@ class MainActivity : ComponentActivity() {
             requestBackgroundIfNeeded()
             requestPostNotificationsIfNeeded()
             maybeStartLocationService()
+            maybePromptBatteryOptimization()
         }
     }
 
@@ -174,6 +180,38 @@ class MainActivity : ComponentActivity() {
         }
     }
     // ====== Fim: Orquestrador ======
+
+    // ====== Início: "Melhorar confiabilidade" (whitelist de bateria) ======
+    private fun maybePromptBatteryOptimization() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            val ignoring = pm.isIgnoringBatteryOptimizations(packageName)
+            if (!ignoring) {
+                AlertDialog.Builder(this)
+                    .setTitle("Melhorar confiabilidade")
+                    .setMessage(
+                        "Para manter o rastreamento ativo em segundo plano, permita que o app " +
+                        "ignore a otimização de bateria. Você pode mudar isso a qualquer momento."
+                    )
+                    .setPositiveButton("Abrir ajustes") { _, _ ->
+                        try {
+                            val it = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                data = Uri.parse("package:$packageName")
+                            }
+                            startActivity(it)
+                        } catch (_: Exception) {
+                            // Fallback: tela geral de otimização de bateria
+                            try {
+                                startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                            } catch (_: Exception) { /* ignora */ }
+                        }
+                    }
+                    .setNegativeButton("Agora não", null)
+                    .show()
+            }
+        }
+    }
+    // ====== Fim: "Melhorar confiabilidade" ======
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
