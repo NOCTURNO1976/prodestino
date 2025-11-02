@@ -43,13 +43,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-// ===== Imports do WorkManager (vigilante silencioso) =====
-import androidx.work.Constraints
-import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.NetworkType
-import androidx.work.PeriodicWorkRequestBuilder
-import androidx.work.WorkManager
-
 class MainActivity : ComponentActivity() {
 
     private lateinit var binding: ActivityMainBinding
@@ -61,7 +54,6 @@ class MainActivity : ComponentActivity() {
         "manaus.prodestino.com"
     )
 
-    // Apenas CÂMERA/ÁUDIO aqui. Localização fica no fluxo 2-passos.
     private val askPerms = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { /* ok */ }
@@ -88,91 +80,6 @@ class MainActivity : ComponentActivity() {
     private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
     private val homeUrl by lazy { BuildConfig.BASE_URL }
 
-    // ====== Orquestrador de permissões (localização/notificação) ======
-    private val reqFineCoarseLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { grants ->
-        val fineOk = grants[Manifest.permission.ACCESS_FINE_LOCATION] == true
-        val coarseOk = grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true
-        if (fineOk || coarseOk) {
-            requestBackgroundIfNeeded()
-            requestPostNotificationsIfNeeded()
-            maybeStartLocationService()
-        }
-    }
-
-    private val reqBackgroundLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) {
-        // Inicia serviço mesmo que ainda não tenha “Sempre permitir”.
-        maybeStartLocationService()
-    }
-
-    private val reqNotifLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { /* opcional */ }
-
-    private fun requestPostNotificationsIfNeeded() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(
-                    this, Manifest.permission.POST_NOTIFICATIONS
-                ) != PackageManager.PERMISSION_GRANTED
-            ) {
-                reqNotifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
-        }
-    }
-
-    private fun requestBackgroundIfNeeded() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val bgGranted = ContextCompat.checkSelfPermission(
-                this, Manifest.permission.ACCESS_BACKGROUND_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-            if (!bgGranted) {
-                reqBackgroundLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
-            }
-        }
-    }
-
-    private fun requestFineCoarseIfNeeded() {
-        val needFine = ContextCompat.checkSelfPermission(
-            this, Manifest.permission.ACCESS_FINE_LOCATION
-        ) != PackageManager.PERMISSION_GRANTED
-        val needCoarse = ContextCompat.checkSelfPermission(
-            this, Manifest.permission.ACCESS_COARSE_LOCATION
-        ) != PackageManager.PERMISSION_GRANTED
-
-        if (needFine || needCoarse) {
-            reqFineCoarseLauncher.launch(arrayOf(
-                Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.ACCESS_COARSE_LOCATION
-            ))
-        } else {
-            // Já tem “enquanto em uso”
-            requestBackgroundIfNeeded()
-            requestPostNotificationsIfNeeded()
-            maybeStartLocationService()
-        }
-    }
-
-    private fun maybeStartLocationService() {
-        val fine = ContextCompat.checkSelfPermission(
-            this, Manifest.permission.ACCESS_FINE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
-        val coarse = ContextCompat.checkSelfPermission(
-            this, Manifest.permission.ACCESS_COARSE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
-        if (fine || coarse) {
-            val it = Intent(this, com.prodestino.manaus.bg.LocationForegroundService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(it)
-            } else {
-                startService(it)
-            }
-        }
-    }
-    // ====== Fim orquestrador ======
-
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -186,22 +93,6 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
-
-        // ======= AQUI ENTRA O AGENDAMENTO (WorkManager) =======
-        val req = PeriodicWorkRequestBuilder<com.prodestino.manaus.bg.EnsureServiceWorker>(
-            15, java.util.concurrent.TimeUnit.MINUTES
-        ).setConstraints(
-            Constraints.Builder()
-                .setRequiredNetworkType(NetworkType.CONNECTED) // roda só com rede
-                .build()
-        ).build()
-
-        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
-            "pd_ensure_service",
-            ExistingPeriodicWorkPolicy.KEEP,
-            req
-        )
-        // ======= FIM DO AGENDAMENTO =======
 
         // Imersivo
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -283,6 +174,7 @@ class MainActivity : ComponentActivity() {
             override fun onGeolocationPermissionsShowPrompt(
                 origin: String?, callback: GeolocationPermissions.Callback?
             ) {
+                // Permite geolocalização do site apenas para hosts permitidos (em primeiro plano)
                 val host = origin?.let { Uri.parse(it).host }
                 callback?.invoke(origin, host != null && allowedHosts.contains(host), false)
             }
@@ -338,14 +230,13 @@ class MainActivity : ComponentActivity() {
             }
         })
 
-        // Pede apenas CÂMERA/ÁUDIO aqui (mantém seu fluxo).
+        // Solicitar somente as permissões necessárias para câmera/áudio e (opcional) geolocalização do site
         askPerms.launch(arrayOf(
             Manifest.permission.CAMERA,
-            Manifest.permission.RECORD_AUDIO
+            Manifest.permission.RECORD_AUDIO,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+            Manifest.permission.ACCESS_FINE_LOCATION
         ))
-
-        // Fluxo 2-passos de localização (uso → background) + notificações
-        requestFineCoarseIfNeeded()
 
         wv.loadUrl(homeUrl)
     }
@@ -378,11 +269,5 @@ class MainActivity : ComponentActivity() {
             insets.systemBarsBehavior =
                 WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
-    }
-
-    override fun onResume() {
-        super.onResume()
-        // Reforça que o serviço esteja ativo quando a Activity voltar
-        maybeStartLocationService()
     }
 }
