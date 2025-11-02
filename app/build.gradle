@@ -18,10 +18,9 @@ android {
         // URL base do seu WebView (já utilizada no app)
         buildConfigField "String", "BASE_URL", "\"https://manaus.prodestino.com/\""
 
-        // === ENDPOINT para onde o serviço Android vai POSTAR a localização ===
-        // >> AJUSTE ESTA URL PARA O MESMO ENDPOINT QUE O SEU SITE JÁ USA HOJE <<
-        // Ex.: "/api/localizacao" / "/api/posicao_motorista.php" — deixe exatamente como o backend espera
-        buildConfigField "String", "LOCATION_POST_URL", "\"https://manaus.prodestino.com/api/localizacao\""
+        // === Endpoints para autodetecção do papel ===
+        buildConfigField "String", "LOCATION_POST_URL_DRIVER", "\"https://manaus.prodestino.com/motorista/posicao_motorista.php\""
+        buildConfigField "String", "LOCATION_POST_URL_PASSENGER", "\"https://manaus.prodestino.com/passageiro/posicao_passageiro.php\""
     }
 
     buildFeatures {
@@ -80,9 +79,9 @@ dependencies {
     implementation "androidx.activity:activity-ktx:1.9.2"
     implementation "androidx.webkit:webkit:1.10.0"
 
-    // === Localização (Fused) ===
+    // Localização (Fused)
     implementation "com.google.android.gms:play-services-location:21.3.0"
 
-    // === HTTP cliente (POST) ===
+    // HTTP cliente
     implementation "com.squareup.okhttp3:okhttp:4.12.0"
 }
