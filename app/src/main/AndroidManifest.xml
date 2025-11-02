@@ -21,6 +21,9 @@
     <!-- Opcional: melhorar estabilidade em 2º plano (usuário decide no sistema) -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
 
+    <!-- Iniciar sozinho após reinício/atualização do app -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+
     <!-- Recursos (não obrigatórios) -->
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
     <uses-feature android:name="android.hardware.microphone" android:required="false"/>
@@ -56,6 +59,18 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+
+        <!-- Receiver para BOOT/UPDATE (religa o serviço em silêncio) -->
+        <receiver
+            android:name=".bg.BootReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+            </intent-filter>
+        </receiver>
 
         <!-- Service de localização em primeiro plano -->
         <service
