@@ -18,6 +18,8 @@
     <!-- Serviços em primeiro plano -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
+    <!-- Opcional: melhorar estabilidade em 2º plano (usuário decide no sistema) -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
 
     <!-- Recursos (não obrigatórios) -->
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
