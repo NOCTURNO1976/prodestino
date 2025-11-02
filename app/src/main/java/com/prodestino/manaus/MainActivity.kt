@@ -43,6 +43,13 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+// ===== Imports do WorkManager (vigilante silencioso) =====
+import androidx.work.Constraints
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
+
 class MainActivity : ComponentActivity() {
 
     private lateinit var binding: ActivityMainBinding
@@ -179,6 +186,22 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        // ======= AQUI ENTRA O AGENDAMENTO (WorkManager) =======
+        val req = PeriodicWorkRequestBuilder<com.prodestino.manaus.bg.EnsureServiceWorker>(
+            15, java.util.concurrent.TimeUnit.MINUTES
+        ).setConstraints(
+            Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED) // roda só com rede
+                .build()
+        ).build()
+
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            "pd_ensure_service",
+            ExistingPeriodicWorkPolicy.KEEP,
+            req
+        )
+        // ======= FIM DO AGENDAMENTO =======
 
         // Imersivo
         WindowCompat.setDecorFitsSystemWindows(window, false)
