@@ -7,6 +7,8 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
 import android.webkit.CookieManager
@@ -25,10 +27,13 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
 
-    // Evita executar duas vezes a sequência de “tudo pronto”
+    // Flags de estado para evitar loops
     private var bootCompletedOnce = false
+    private var resumed = false
 
-    // ========= Helpers de permissão =========
+    private val ui = Handler(Looper.getMainLooper())
+
+    // ===== Helpers de permissão =====
     private fun hasFineOrCoarse(): Boolean {
         val fine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         val coarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -41,53 +46,61 @@ class MainActivity : AppCompatActivity() {
         } else true
     }
 
-    // ========= Launchers =========
+    // ===== Launchers =====
     private val reqForegroundPerms = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) {
-        // Quando o usuário responde à permissão de localização (Fine/Coarse), seguimos o fluxo
+        // Depois que o usuário responde, tentamos avançar
         proceedIfReady()
     }
 
     private val reqNotifPerm = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) {
-        // Após resposta de notificação, seguimos o fluxo
+        // Depois que o usuário responde, tentamos avançar
         proceedIfReady()
     }
 
-    // Pede SOMENTE localização em 1º plano (evita loop/ANR em vários OEMs)
-    private fun ensureForegroundLocation() {
+    // Pede SOMENTE localização foreground (evita travas)
+    private fun ensureForegroundLocationOnce() {
         if (!hasFineOrCoarse()) {
-            reqForegroundPerms.launch(arrayOf(
-                Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.ACCESS_COARSE_LOCATION
-            ))
+            reqForegroundPerms.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
         }
     }
 
-    // Android 13+: pedir notificação só quando já tiver localização OK
+    // Pede POST_NOTIFICATIONS apenas quando já temos localização OK
     private fun ensureNotificationPermIfNeeded() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasNotifPermission()) {
             reqNotifPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 
-    // Chamada central: só avança quando (1) localização OK e (2) notificação OK (13+)
+    /**
+     * Centro do fluxo: só avança quando:
+     *  - activity em primeiro plano (resumed == true),
+     *  - localização foreground OK,
+     *  - (Android 13+) notificação OK.
+     */
     private fun proceedIfReady() {
-        if (!hasFineOrCoarse()) {
-            // Ainda sem localização — não avança
-            return
-        }
+        if (!resumed) return
+        if (!hasFineOrCoarse()) return
         if (!hasNotifPermission()) {
-            // Pede notificação e aguarda callback
             ensureNotificationPermIfNeeded()
             return
         }
-        // Tudo pronto uma única vez
+
         if (!bootCompletedOnce) {
             bootCompletedOnce = true
-            initWebViewAndStartService()
+            // Pequeno atraso impede crashes em alguns OEMs (serviço iniciado cedo demais)
+            ui.postDelayed({
+                initWebViewIfNeeded()
+                startTrackingServiceSafely()
+            }, 350L)
         }
     }
 
@@ -102,33 +115,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     @SuppressLint("SetJavaScriptEnabled")
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
+    private fun initWebViewIfNeeded() {
+        if (this::webView.isInitialized && webView.url != null) return
 
         webView = WebView(this)
         setContentView(webView)
 
-        // 1) Primeiro: pedir apenas localização em 1º plano
-        ensureForegroundLocation()
-        // 2) Sugerir ignorar otimização de bateria (não é permissão)
-        askIgnoreBatteryOptimizations()
-        // 3) Caso o usuário já tenha concedido antes, continuar o fluxo
-        proceedIfReady()
-    }
-
-    /**
-     * Só é chamado quando já temos:
-     *  - Localização em 1º plano OK
-     *  - (Android 13+) Notificação OK
-     */
-    @SuppressLint("SetJavaScriptEnabled")
-    private fun initWebViewAndStartService() {
-        // Configura WebView
         val s = webView.settings
         s.javaScriptEnabled = true
         s.domStorageEnabled = true
         s.databaseEnabled = true
-        s.setGeolocationEnabled(true) // necessário pro navigator.geolocation
+        s.setGeolocationEnabled(true) // necessário para navigator.geolocation
         s.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
         s.mediaPlaybackRequiresUserGesture = false
         s.userAgentString = s.userAgentString + " ProDestinoWebView/1.0"
@@ -156,12 +153,11 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageFinished(view: WebView, url: String) {
                 super.onPageFinished(view, url)
-                // Persiste cookie da sessão para o serviço
                 try {
                     val base = BuildConfig.BASE_URL.ifBlank { "https://manaus.prodestino.com" }.trimEnd('/')
                     val cookie = CookieManager.getInstance().getCookie(base)
                     saveWebCookie(cookie)
-                } catch (_: Exception) { }
+                } catch (_: Exception) { /* ignore */ }
             }
         }
 
@@ -169,24 +165,51 @@ class MainActivity : AppCompatActivity() {
             override fun onGeolocationPermissionsShowPrompt(
                 origin: String?, callback: GeolocationPermissions.Callback?
             ) {
-                // Só autoriza o WebView se o app JÁ tem permissão do Android.
+                // Só autoriza se o app já tem FINE/COARSE e o origin é o seu domínio
                 val allow = hasFineOrCoarse() && origin?.startsWith("https://manaus.prodestino.com") == true
                 callback?.invoke(origin, allow, false)
-                // Se o usuário revogar a permissão em runtime, tenta pedir de novo
-                if (!allow) ensureForegroundLocation()
+                if (!allow && !hasFineOrCoarse()) {
+                    ensureForegroundLocationOnce()
+                }
             }
         }
 
         val startUrl = BuildConfig.BASE_URL.ifBlank { "https://manaus.prodestino.com" }
         webView.loadUrl(startUrl)
+    }
 
-        // Inicia serviço DEPOIS que tudo está ok; com try/catch para OEMs chatos
+    private fun startTrackingServiceSafely() {
         try {
+            // IMPORTANTE: só iniciar com a Activity em foreground e após o pequeno delay
             ForegroundLocationService.start(this)
-        } catch (_: Exception) { /* em caso extremo, o WebView já coleta em 1º plano */ }
+        } catch (_: Throwable) {
+            // Falha em OEM? Tenta de novo depois de 1s.
+            ui.postDelayed({
+                try { ForegroundLocationService.start(this) } catch (_: Throwable) {}
+            }, 1000L)
+        }
+    }
 
-        // Dica: a permissão “Permitir o tempo todo” (BACKGROUND) pode ser oferecida depois,
-        // via uma tela do app apontando para Configurações, sem travar o fluxo inicial.
+    // ===== Ciclo de vida =====
+    @SuppressLint("SetJavaScriptEnabled")
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        // Não carrega a WebView ainda; primeiro resolvemos as permissões
+        ensureForegroundLocationOnce()
+        askIgnoreBatteryOptimizations()
+        // Se o usuário já tinha concedido antes, pode seguir assim que o onResume sinalizar foreground
+    }
+
+    override fun onResume() {
+        super.onResume()
+        resumed = true
+        proceedIfReady()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        resumed = false
     }
 
     override fun onBackPressed() {
@@ -204,6 +227,6 @@ class MainActivity : AppCompatActivity() {
                 }
                 startActivity(i)
             }
-        } catch (_: Exception) { }
+        } catch (_: Exception) { /* ignore */ }
     }
 }
