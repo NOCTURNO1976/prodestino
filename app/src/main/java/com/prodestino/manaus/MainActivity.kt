@@ -2,9 +2,13 @@ package com.prodestino.manaus
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import android.webkit.CookieManager
 import android.webkit.GeolocationPermissions
 import android.webkit.WebChromeClient
@@ -15,29 +19,29 @@ import android.webkit.WebViewClient
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import com.prodestino.manaus.location.ForegroundLocationService
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
 
-    private val requestLocationPerms = registerForActivityResult(
+    private val requestPerms = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { /* sem UI extra; o WebView vai tentar de novo quando a página pedir */ }
+    ) { /* sem UI extra */ }
 
-    private fun ensureLocationPerms() {
-        val needFine = ContextCompat.checkSelfPermission(
-            this, Manifest.permission.ACCESS_FINE_LOCATION
-        ) != PackageManager.PERMISSION_GRANTED
-        val needCoarse = ContextCompat.checkSelfPermission(
-            this, Manifest.permission.ACCESS_COARSE_LOCATION
-        ) != PackageManager.PERMISSION_GRANTED
-
-        if (needFine || needCoarse) {
-            requestLocationPerms.launch(arrayOf(
-                Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.ACCESS_COARSE_LOCATION
-            ))
+    private fun ensurePerms() {
+        val wants = mutableListOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        )
+        // Background só existe a partir do Android 10 (Q)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            wants.add(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
         }
+        val need = wants.any {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (need) requestPerms.launch(wants.toTypedArray())
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -46,33 +50,25 @@ class MainActivity : AppCompatActivity() {
         webView = WebView(this)
         setContentView(webView)
 
-        ensureLocationPerms()
+        ensurePerms()
+        askIgnoreBatteryOptimizations()
 
-        val settings = webView.settings
-        settings.javaScriptEnabled = true
-        settings.domStorageEnabled = true
-        settings.databaseEnabled = true
-        // habilita geolocalização para JS
-        settings.setGeolocationEnabled(true)
-        settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-        settings.mediaPlaybackRequiresUserGesture = false
-        settings.userAgentString = settings.userAgentString + " ProDestinoWebView/1.0"
+        val s = webView.settings
+        s.javaScriptEnabled = true
+        s.domStorageEnabled = true
+        s.databaseEnabled = true
+        s.setGeolocationEnabled(true)
+        s.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+        s.mediaPlaybackRequiresUserGesture = false
+        s.userAgentString = s.userAgentString + " ProDestinoWebView/1.0"
 
-        // cookies/sessão (PHPSESSID)
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
 
-        // Garante que URLs com ponto final NÃO sejam usadas
         webView.webViewClient = object : WebViewClient() {
-            override fun shouldOverrideUrlLoading(
-                view: WebView,
-                request: WebResourceRequest
-            ): Boolean {
-                val url = request.url.toString()
+            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val uri = request.url
                 val host = uri.host ?: return false
-
-                // se vier "manaus.prodestino.com." → redireciona para sem ponto
                 if (host.endsWith(".")) {
                     val fixed = Uri.Builder()
                         .scheme(uri.scheme ?: "https")
@@ -87,28 +83,41 @@ class MainActivity : AppCompatActivity() {
                 return false
             }
         }
-
-        // Autoriza geolocalização automaticamente só para o seu domínio
         webView.webChromeClient = object : WebChromeClient() {
-            override fun onGeolocationPermissionsShowPrompt(
-                origin: String?,
-                callback: GeolocationPermissions.Callback?
-            ) {
+            override fun onGeolocationPermissionsShowPrompt(origin: String?, callback: GeolocationPermissions.Callback?) {
                 val allow = origin?.startsWith("https://manaus.prodestino.com") == true
                 callback?.invoke(origin, allow, false)
             }
         }
 
-        // URL base do seu sistema (sem barra/ponto no final)
         val startUrl = BuildConfig.BASE_URL.ifBlank { "https://manaus.prodestino.com" }
         webView.loadUrl(startUrl)
+
+        // Inicia o serviço de rastreamento quando o app abre
+        ForegroundLocationService.start(this)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // Opcional: manter rodando mesmo ao fechar a Activity (não para o serviço).
+        // Se quiser parar quando fechar o app, descomente:
+        // ForegroundLocationService.stop(this)
     }
 
     override fun onBackPressed() {
-        if (this::webView.isInitialized && webView.canGoBack()) {
-            webView.goBack()
-        } else {
-            super.onBackPressed()
-        }
+        if (this::webView.isInitialized && webView.canGoBack()) webView.goBack() else super.onBackPressed()
+    }
+
+    private fun askIgnoreBatteryOptimizations() {
+        try {
+            val pm = getSystemService(POWER_SERVICE) as PowerManager
+            val pkg = packageName
+            if (!pm.isIgnoringBatteryOptimizations(pkg)) {
+                val i = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:$pkg")
+                }
+                startActivity(i)
+            }
+        } catch (_: Exception) { /* ignore */ }
     }
 }
