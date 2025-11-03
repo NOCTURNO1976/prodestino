@@ -4,12 +4,17 @@
     <!-- Permissões base -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+
+    <!-- Câmera/áudio (opcionais: upload de mídia, chamadas no site) -->
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
 
-    <!-- Permissões de localização (somente para uso via WebView/geolocation do site, em primeiro plano) -->
+    <!-- Geolocalização (somente foreground via WebView/JS) -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+
+    <!-- Vibração para feedback/avisos -->
+    <uses-permission android:name="android.permission.VIBRATE"/>
 
     <!-- Recursos (opcionais) -->
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
@@ -32,10 +37,10 @@
             android:grantUriPermissions="true">
             <meta-data
                 android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/file_paths" />
+                android:resource="@xml/file_paths"/>
         </provider>
 
-        <!-- Activity principal -->
+        <!-- Activity principal (WebView) -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -47,8 +52,7 @@
             </intent-filter>
         </activity>
 
-        <!-- (REMOVIDO) BootReceiver -->
-        <!-- (REMOVIDO) Service em primeiro plano de localização -->
+        <!-- (Sem serviços/receivers de localização em background neste app) -->
 
     </application>
 </manifest>
