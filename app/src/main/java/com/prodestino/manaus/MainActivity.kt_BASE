@@ -1,3 +1,5 @@
+// sem proteção de print e gravação de tela, mas tem proteçãod e 404 pra não expor o endereço web
+
 package com.prodestino.manaus
 
 import android.Manifest
