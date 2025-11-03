@@ -73,6 +73,16 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ===== Helper: salva cookie (PHPSESSID) do WebView no SharedPreferences =====
+    private fun saveWebCookie(cookie: String?) {
+        if (!cookie.isNullOrBlank()) {
+            getSharedPreferences("app_prefs", MODE_PRIVATE)
+                .edit()
+                .putString("web_cookie", cookie)
+                .apply()
+        }
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -97,7 +107,7 @@ class MainActivity : AppCompatActivity() {
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
 
-        // Corrige URLs com ponto final no host
+        // Corrige URLs com ponto final no host + captura cookie ao concluir o carregamento
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val uri = request.url
@@ -114,6 +124,16 @@ class MainActivity : AppCompatActivity() {
                     return true
                 }
                 return false
+            }
+
+            override fun onPageFinished(view: WebView, url: String) {
+                super.onPageFinished(view, url)
+                // Pega e persiste os cookies do domínio base (inclui PHPSESSID)
+                try {
+                    val base = BuildConfig.BASE_URL.ifBlank { "https://manaus.prodestino.com" }.trimEnd('/')
+                    val cookie = CookieManager.getInstance().getCookie(base)
+                    saveWebCookie(cookie)
+                } catch (_: Exception) { /* ignore */ }
             }
         }
 
