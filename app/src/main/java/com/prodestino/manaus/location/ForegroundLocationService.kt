@@ -20,8 +20,8 @@ import java.net.URL
 /**
  * Serviço de localização em 1º plano (ForegroundService).
  * - Coleta posição periodicamente via FusedLocationProviderClient
- * - Envia para a sua API REST usando o mesmo cookie (PHPSESSID) do WebView
- * - Continua rodando com a tela apagada/minimizado
+ * - Envia para a API REST usando o cookie (PHPSESSID) do WebView
+ * - Resiliente a falhas de permissão/notification em Android 13/14
  */
 class ForegroundLocationService : Service() {
 
@@ -30,19 +30,21 @@ class ForegroundLocationService : Service() {
         private const val NOTI_ID = 1001
         private const val TAG = "FGLocationService"
 
-        /** Inicia o serviço (lida com diferenças de versão) */
         fun start(ctx: Context) {
             val i = Intent(ctx, ForegroundLocationService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                ctx.startForegroundService(i)
-            } else {
-                ctx.startService(i)
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    ctx.startForegroundService(i)
+                } else {
+                    ctx.startService(i)
+                }
+            } catch (t: Throwable) {
+                Log.e(TAG, "startForegroundService falhou: ${t.message}")
             }
         }
 
-        /** Para o serviço */
         fun stop(ctx: Context) {
-            ctx.stopService(Intent(ctx, ForegroundLocationService::class.java))
+            try { ctx.stopService(Intent(ctx, ForegroundLocationService::class.java)) } catch (_: Throwable) {}
         }
     }
 
@@ -53,76 +55,78 @@ class ForegroundLocationService : Service() {
     override fun onCreate() {
         super.onCreate()
 
-        // 1) Canal + notificação fixa (obrigatório para foreground service de localização)
+        // 1) Notificação fixa (obrigatório para foreground de localização)
         createChannel()
         val notification = buildNotification("Rastreamento ativo")
         try {
+            // Android 14 pode exigir startForeground logo ao criar
             startForeground(NOTI_ID, notification)
         } catch (e: SecurityException) {
-            // Em alguns aparelhos/fluxos sem POST_NOTIFICATIONS isso pode falhar.
-            Log.e(TAG, "startForeground falhou: ${e.message}")
+            Log.e(TAG, "startForeground falhou (notificações/perm.): ${e.message}")
+            stopSelf()
+            return
+        } catch (t: Throwable) {
+            Log.e(TAG, "startForeground erro inesperado: ${t.message}")
             stopSelf()
             return
         }
 
-        // 2) Configuração do fornecedor de localização (intervalos ajustáveis)
+        // 2) Config do provedor de localização
         fused = LocationServices.getFusedLocationProviderClient(this)
-        req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 15_000L) // alvo: 15s
-            .setMinUpdateIntervalMillis(10_000L)   // mínimo entre updates
-            .setWaitForAccurateLocation(true)      // tenta melhorar a precisão
-            .setMaxUpdateDelayMillis(30_000L)      // coalescing até 30s
+        req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 15_000L) // alvo 15s
+            .setMinUpdateIntervalMillis(10_000L)
+            .setWaitForAccurateLocation(true)
+            .setMaxUpdateDelayMillis(30_000L)
             .build()
 
-        // 3) Callback para cada atualização de localização
+        // 3) Callback de localização
         callback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
-                result.lastLocation?.let { loc ->
-                    // Monta payload JSON conforme contrato da sua API
-                    val body = JSONObject().apply {
-                        put("latitude",  loc.latitude)
-                        put("longitude", loc.longitude)
-                        put("velocidade", if (loc.hasSpeed())  loc.speed.toDouble() else JSONObject.NULL)
-                        put("rumo",      if (loc.hasBearing()) Math.round(loc.bearing) else JSONObject.NULL)
-                    }
-                    // Envia como MOTORISTA
-                    sendToApi("/api/v1/motoristas/localizacoes.php", body)
-                    // Para enviar também do passageiro, descomente:
-                    // sendToApi("/api/v1/passageiros/localizacoes.php", body)
+                val loc = result.lastLocation ?: return
+                val body = JSONObject().apply {
+                    put("latitude",  loc.latitude)
+                    put("longitude", loc.longitude)
+                    put("velocidade", if (loc.hasSpeed())  loc.speed.toDouble() else JSONObject.NULL)
+                    put("rumo",      if (loc.hasBearing()) Math.round(loc.bearing) else JSONObject.NULL)
+                    // timestamps úteis para depurar/conciliar
+                    put("provider", loc.provider ?: JSONObject.NULL)
+                    put("timestamp", loc.time)
                 }
+                sendToApi("/api/v1/motoristas/localizacoes.php", body)
+                // Para passageiro também, se quiser:
+                // sendToApi("/api/v1/passageiros/localizacoes.php", body)
             }
         }
 
-        // 4) Inicia a escuta das atualizações
+        // 4) Começa a escutar updates (com try/catch robusto)
         tryStartUpdates()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Se o sistema recriar o serviço, garante que os updates continuem
+        // Se o sistema recriar, tenta garantir updates
         tryStartUpdates()
         return START_STICKY
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        // Remove updates para evitar vazamento
         try { callback?.let { fused.removeLocationUpdates(it) } } catch (_: Exception) {}
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    /** Solicita updates ao FusedLocation com tratamento de exceções (permissões) */
     private fun tryStartUpdates() {
         try {
-            fused.requestLocationUpdates(req, callback as LocationCallback, Looper.getMainLooper())
+            val cb = callback ?: return
+            fused.requestLocationUpdates(req, cb, Looper.getMainLooper())
         } catch (e: SecurityException) {
+            // Sem permissões de localização — o app continua, só não envia GPS
             Log.e(TAG, "Permissões de localização ausentes: ${e.message}")
-            // A Activity (MainActivity) é quem pede os grants. Aqui seguimos vivos, mas sem updates.
-        } catch (e: Exception) {
-            Log.e(TAG, "Erro requestLocationUpdates: ${e.message}")
+        } catch (t: Throwable) {
+            Log.e(TAG, "Erro em requestLocationUpdates: ${t.message}")
         }
     }
 
-    /** Cria o NotificationChannel para Android 8+ */
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val ch = NotificationChannel(
@@ -132,18 +136,19 @@ class ForegroundLocationService : Service() {
             ).apply {
                 description = "Localização em tempo real"
                 setShowBadge(false)
+                enableVibration(false)
             }
-            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            nm.createNotificationChannel(ch)
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                .createNotificationChannel(ch)
         }
     }
 
-    /** Constrói a notificação persistente do serviço */
     private fun buildNotification(text: String): Notification {
         val intent = Intent(this, MainActivity::class.java)
         val pi = PendingIntent.getActivity(
             this, 0, intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0)
+            PendingIntent.FLAG_UPDATE_CURRENT or
+                    (if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0)
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Pro Destino")
@@ -151,20 +156,16 @@ class ForegroundLocationService : Service() {
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setOngoing(true)
             .setContentIntent(pi)
+            .setOnlyAlertOnce(true)
             .build()
     }
 
-    /**
-     * Envia o JSON para a API usando o cookie da sessão do site (PHPSESSID).
-     * 1) Tenta pegar o cookie salvo no SharedPreferences ("app_prefs"."web_cookie")
-     * 2) Se não existir, faz fallback para o CookieManager (pode falhar em bg)
-     */
+    /** Envia JSON para a API com o mesmo cookie do WebView */
     private fun sendToApi(path: String, json: JSONObject) {
         Thread {
             try {
-                // Base da URL (vem do BuildConfig ou cai no domínio padrão)
-                val base = BuildConfig.BASE_URL.ifBlank { "https://manaus.prodestino.com/" }
-                val url = URL(base.trimEnd('/') + path)
+                val base = (BuildConfig.BASE_URL.ifBlank { "https://manaus.prodestino.com/" }).trimEnd('/')
+                val url = URL(base + path)
 
                 val conn = (url.openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
@@ -173,41 +174,33 @@ class ForegroundLocationService : Service() {
                     doOutput = true
                     setRequestProperty("Content-Type", "application/json; charset=utf-8")
 
-                    // === Cabeçalho Cookie (PHPSESSID) ===
-                    // 1) Primeiro tenta o cookie persistido pelo MainActivity (SharedPreferences)
+                    // Tenta cookie salvo no SharedPreferences (preferido)
                     var cookieToSend: String? = null
                     try {
                         val prefs = getSharedPreferences("app_prefs", MODE_PRIVATE)
                         val saved = prefs.getString("web_cookie", null)
-                        if (!saved.isNullOrBlank()) {
-                            cookieToSend = saved
-                        }
-                    } catch (_: Exception) { /* ignore */ }
+                        if (!saved.isNullOrBlank()) cookieToSend = saved
+                    } catch (_: Exception) {}
 
-                    // 2) Fallback: tenta o CookieManager (pode não funcionar em background)
+                    // Fallback: CookieManager (pode falhar em bg)
                     if (cookieToSend.isNullOrBlank()) {
                         try {
-                            val cm = CookieManager.getInstance()
-                            cookieToSend = cm.getCookie(base.trimEnd('/'))
-                        } catch (_: Exception) { /* ignore */ }
+                            cookieToSend = CookieManager.getInstance().getCookie(base)
+                        } catch (_: Exception) {}
                     }
 
-                    // Se achou algum cookie, adiciona o header
                     if (!cookieToSend.isNullOrBlank()) {
                         setRequestProperty("Cookie", cookieToSend)
                     }
                 }
 
-                // Corpo JSON
                 BufferedOutputStream(conn.outputStream).use { os ->
                     os.write(json.toString().toByteArray(Charsets.UTF_8))
                 }
 
-                // Resposta
                 val code = conn.responseCode
                 if (code !in 200..299) {
-                    // Log útil para depurar: 401 geralmente é sessão inválida/expirada
-                    Log.w(TAG, "API ${path} HTTP $code")
+                    Log.w(TAG, "API $path HTTP $code")
                 }
                 conn.disconnect()
             } catch (e: Exception) {
