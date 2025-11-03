@@ -2,6 +2,7 @@ package com.prodestino.manaus
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -34,8 +35,6 @@ class MainActivity : AppCompatActivity() {
     // Flags de estado
     private var bootCompletedOnce = false
     private var resumed = false
-
-    // Serviço só inicia quando a página real estiver pronta
     private var pageReady = false
     private var serviceStarted = false
 
@@ -43,20 +42,14 @@ class MainActivity : AppCompatActivity() {
 
     // ===== Helpers de permissão =====
     private fun hasFineOrCoarse(): Boolean {
-        val fine = ContextCompat.checkSelfPermission(
-            this, Manifest.permission.ACCESS_FINE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
-        val coarse = ContextCompat.checkSelfPermission(
-            this, Manifest.permission.ACCESS_COARSE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
+        val fine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val coarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
         return fine || coarse
     }
 
     private fun hasNotifPermission(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            ContextCompat.checkSelfPermission(
-                this, Manifest.permission.POST_NOTIFICATIONS
-            ) == PackageManager.PERMISSION_GRANTED
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
         } else true
     }
 
@@ -64,7 +57,6 @@ class MainActivity : AppCompatActivity() {
     private val reqForegroundPerms = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) {
-        // Depois que o usuário responde, apenas reavaliamos condições
         maybeStartService()
         proceedIfReady()
     }
@@ -75,7 +67,6 @@ class MainActivity : AppCompatActivity() {
         proceedIfReady()
     }
 
-    // Pede SOMENTE localização foreground (evita travas)
     private fun ensureForegroundLocationOnce() {
         if (!hasFineOrCoarse()) {
             reqForegroundPerms.launch(
@@ -87,33 +78,26 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Pede POST_NOTIFICATIONS apenas quando já temos localização OK
     private fun ensureNotificationPermIfNeeded() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasNotifPermission()) {
             reqNotifPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 
-    /**
-     * Centro do fluxo: só avança quando:
-     *  - activity em primeiro plano,
-     *  - localização foreground OK,
-     *  - (Android 13+) notificação OK.
-     */
+    /** Prossegue somente quando: em primeiro plano + localização OK + (Android 13+) notificação OK */
     private fun proceedIfReady() {
         if (!resumed) return
         if (!hasFineOrCoarse()) return
-        if (!hasNotifPermission()) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasNotifPermission()) {
             ensureNotificationPermIfNeeded()
             return
         }
 
         if (!bootCompletedOnce) {
             bootCompletedOnce = true
-            // Pequeno atraso impede crashes em alguns OEMs
             ui.postDelayed({
                 initWebViewIfNeeded()
-                // NÃO iniciamos o serviço aqui — quem dispara é maybeStartService()
+                // Serviço só inicia quando a página real marcar pageReady
                 maybeStartService()
             }, 350L)
         }
@@ -129,12 +113,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Dispara o serviço se (e só se) a página real já carregou e as permissões exigidas existem
+    /** Dispara serviço se (e só se) a página real já carregou e permissões OK */
     private fun maybeStartService() {
         if (serviceStarted) return
         if (!pageReady) return
         if (!hasFineOrCoarse()) return
-        // No Android 13+, garanta permissão de notificação ANTES do serviço
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasNotifPermission()) {
             ensureNotificationPermIfNeeded()
             return
@@ -143,7 +126,6 @@ class MainActivity : AppCompatActivity() {
             ForegroundLocationService.start(this)
             serviceStarted = true
         } catch (_: Throwable) {
-            // Se algum OEM bloquear, tenta 1s depois
             ui.postDelayed({
                 try { ForegroundLocationService.start(this); serviceStarted = true } catch (_: Throwable) {}
             }, 1000L)
@@ -161,7 +143,7 @@ class MainActivity : AppCompatActivity() {
         s.javaScriptEnabled = true
         s.domStorageEnabled = true
         s.databaseEnabled = true
-        s.setGeolocationEnabled(true) // necessário para navigator.geolocation
+        s.setGeolocationEnabled(true)
         s.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
         s.mediaPlaybackRequiresUserGesture = false
         s.userAgentString = s.userAgentString + " ProDestinoWebView/1.0"
@@ -169,93 +151,85 @@ class MainActivity : AppCompatActivity() {
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
 
-        // ==== BLOCO COM TRATAMENTO DE ERROS (offline/404/SSL) ====
+        val base = (BuildConfig.BASE_URL.ifBlank { "https://manaus.prodestino.com" }).trimEnd('/')
+
+        // ==== Client com tratamento de erros e intents externas ====
         webView.webViewClient = object : WebViewClient() {
 
             private fun showOffline() {
-                // Evita loop se já estamos na página local
                 if (webView.url?.startsWith("file:///android_asset/") == true) return
                 webView.loadUrl("file:///android_asset/offline.html")
             }
 
-            override fun shouldOverrideUrlLoading(
-                view: WebView,
-                request: WebResourceRequest
-            ): Boolean {
+            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val uri = request.url
-                val host = uri.host ?: return false
-                // Corrige hosts terminando com ponto
-                if (host.endsWith(".")) {
-                    val fixed = Uri.Builder()
-                        .scheme(uri.scheme ?: "https")
-                        .encodedAuthority(host.trimEnd('.'))
-                        .encodedPath(uri.encodedPath)
-                        .encodedQuery(uri.encodedQuery)
-                        .build()
-                        .toString()
-                    view.loadUrl(fixed)
+                val scheme = uri.scheme?.lowercase() ?: return false
+
+                // 1) Intent URLs: intent://, whatsapp://, market://, tel:, mailto:, etc.
+                if (scheme in listOf("intent", "whatsapp", "tel", "mailto", "market")) {
+                    try {
+                        val intent = Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME)
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        startActivity(intent)
+                    } catch (_: ActivityNotFoundException) {
+                        // Fallback genérico (abre discador, e-mail, etc., se possível)
+                        try { startActivity(Intent(Intent.ACTION_VIEW, uri)) } catch (_: Throwable) {}
+                    } catch (_: Throwable) {}
                     return true
                 }
+
+                // 2) http/https normal — deixa seguir; corrige host com ponto final
+                if (scheme == "http" || scheme == "https") {
+                    val host = uri.host ?: return false
+                    if (host.endsWith(".")) {
+                        val fixed = Uri.Builder()
+                            .scheme(uri.scheme ?: "https")
+                            .encodedAuthority(host.trimEnd('.'))
+                            .encodedPath(uri.encodedPath)
+                            .encodedQuery(uri.encodedQuery)
+                            .build()
+                            .toString()
+                        view.loadUrl(fixed)
+                        return true
+                    }
+                    return false
+                }
+
                 return false
             }
 
-            // HTTP 4xx/5xx (apenas no frame principal)
-            override fun onReceivedHttpError(
-                view: WebView,
-                request: WebResourceRequest,
-                errorResponse: WebResourceResponse
-            ) {
-                if (request.isForMainFrame && errorResponse.statusCode >= 400) {
-                    showOffline()
-                }
+            override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
+                if (request.isForMainFrame && errorResponse.statusCode >= 400) showOffline()
             }
 
-            // Falhas de rede (sem internet, timeout, DNS…)
-            override fun onReceivedError(
-                view: WebView,
-                request: WebResourceRequest,
-                error: android.webkit.WebResourceError
-            ) {
+            override fun onReceivedError(view: WebView, request: WebResourceRequest, error: android.webkit.WebResourceError) {
                 if (request.isForMainFrame) showOffline()
             }
 
-            // Erros SSL (cert inválido, data/hora errada…)
-            override fun onReceivedSslError(
-                view: WebView,
-                handler: SslErrorHandler,
-                error: SslError
-            ) {
+            override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
                 handler.cancel()
                 showOffline()
             }
 
             override fun onPageFinished(view: WebView, url: String) {
                 super.onPageFinished(view, url)
-
                 // Captura cookie da base para o serviço
                 try {
-                    val base = BuildConfig.BASE_URL.ifBlank { "https://manaus.prodestino.com" }.trimEnd('/')
                     val cookie = CookieManager.getInstance().getCookie(base)
                     saveWebCookie(cookie)
-                } catch (_: Exception) { /* ignore */ }
+                } catch (_: Exception) {}
 
-                // Considera "pronto" somente quando for sua URL HTTPS (não os assets locais)
-                pageReady = url.startsWith("https://manaus.prodestino.com")
+                // Considera "pronto" somente quando for sua URL HTTPS (não assets locais)
+                pageReady = url.startsWith(base)
                 maybeStartService()
             }
         }
-        // ==== FIM DO BLOCO DE TRATAMENTO DE ERROS ====
 
         webView.webChromeClient = object : WebChromeClient() {
-            override fun onGeolocationPermissionsShowPrompt(
-                origin: String?, callback: GeolocationPermissions.Callback?
-            ) {
-                // Só autoriza se o app já tem FINE/COARSE e o origin é o seu domínio
-                val allow = hasFineOrCoarse() && origin?.startsWith("https://manaus.prodestino.com") == true
+            override fun onGeolocationPermissionsShowPrompt(origin: String?, callback: GeolocationPermissions.Callback?) {
+                val allow = hasFineOrCoarse() && origin?.startsWith(base) == true
                 callback?.invoke(origin, allow, false)
-                if (!allow && !hasFineOrCoarse()) {
-                    ensureForegroundLocationOnce()
-                }
+                if (!allow && !hasFineOrCoarse()) ensureForegroundLocationOnce()
             }
         }
 
@@ -266,10 +240,8 @@ class MainActivity : AppCompatActivity() {
     // ===== Ciclo de vida =====
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        // Primeiro as permissões; o WebView vem depois
-        ensureForegroundLocationOnce()
-        askIgnoreBatteryOptimizations()
+        ensureForegroundLocationOnce()     // primeiro as permissões
+        askIgnoreBatteryOptimizations()    // ajuda a manter no BG
     }
 
     override fun onResume() {
@@ -278,7 +250,6 @@ class MainActivity : AppCompatActivity() {
         hideSystemBars()
         proceedIfReady()
 
-        // Se estivermos na tela offline local e a activity voltou, tente recarregar o site
         if (this::webView.isInitialized) {
             val u = webView.url ?: ""
             if (u.startsWith("file:///android_asset/")) {
@@ -299,7 +270,6 @@ class MainActivity : AppCompatActivity() {
         else super.onBackPressed()
     }
 
-    // Esconde barra de navegação (imersivo)
     private fun hideSystemBars() {
         if (Build.VERSION.SDK_INT >= 30) {
             window.insetsController?.let { c ->
@@ -310,12 +280,10 @@ class MainActivity : AppCompatActivity() {
         } else {
             @Suppress("DEPRECATION")
             window.decorView.systemUiVisibility =
-                (View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                        or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY)
+                (View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY)
         }
     }
 
-    // Pede para ignorar otimização de bateria (ajuda no background)
     private fun askIgnoreBatteryOptimizations() {
         try {
             val pm = getSystemService(POWER_SERVICE) as PowerManager
@@ -326,6 +294,6 @@ class MainActivity : AppCompatActivity() {
                 }
                 startActivity(i)
             }
-        } catch (_: Exception) { /* ignore */ }
+        } catch (_: Exception) { }
     }
 }
