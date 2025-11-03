@@ -1,30 +1,24 @@
 <!-- app/src/main/AndroidManifest.xml -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Internet / rede -->
+    <!-- Permissões base -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
-
-    <!-- Mídia (opcional) -->
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
 
-    <!-- Geolocalização (foreground + background) -->
+    <!-- Localização (primeiro plano) -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
-    <!-- Necessário para localização com o app em segundo plano -->
+
+    <!-- Localização em 2º plano (Android 10+) -->
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
 
-    <!-- Serviço em primeiro plano (obrigatório p/ rastrear em background) -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
-    <!-- Android 14+ tipa o serviço de localização -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
-
-    <!-- Vibração (feedback) -->
-    <uses-permission android:name="android.permission.VIBRATE"/>
-
-    <!-- Reiniciar tracking após boot do aparelho -->
+    <!-- Receber evento de boot para subir o serviço -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+
+    <!-- Android 13+: permissão para postar notificação do ForegroundService -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
     <application
         android:label="@string/app_name"
@@ -35,7 +29,7 @@
         android:networkSecurityConfig="@xml/network_security_config"
         android:allowBackup="false">
 
-        <!-- FileProvider para câmera/upload -->
+        <!-- FileProvider para câmera/upload (já existente no seu app) -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -43,10 +37,10 @@
             android:grantUriPermissions="true">
             <meta-data
                 android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/file_paths"/>
+                android:resource="@xml/file_paths" />
         </provider>
 
-        <!-- Activity principal (WebView) -->
+        <!-- Activity principal -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -58,14 +52,13 @@
             </intent-filter>
         </activity>
 
-        <!-- Serviço de rastreamento em 1º plano (implementaremos no Passo 2) -->
+        <!-- >>> Serviço de localização em 1º plano (ESSENCIAL) <<< -->
         <service
             android:name=".location.ForegroundLocationService"
             android:exported="false"
-            android:enabled="true"
             android:foregroundServiceType="location" />
 
-        <!-- Reinicia o serviço após reboot (implementaremos o receiver no Passo 2) -->
+        <!-- >>> Receiver para iniciar o serviço após reiniciar o aparelho <<< -->
         <receiver
             android:name=".location.BootReceiver"
             android:enabled="true"
