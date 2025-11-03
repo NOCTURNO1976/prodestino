@@ -6,7 +6,6 @@ import android.content.Intent
 import android.os.IBinder
 import android.os.Build
 import android.os.Looper
-// CookieManager não é mais obrigatório, mas deixo como fallback opcional
 import android.webkit.CookieManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -23,7 +22,6 @@ import java.net.URL
  * - Coleta posição periodicamente via FusedLocationProviderClient
  * - Envia para a sua API REST usando o mesmo cookie (PHPSESSID) do WebView
  * - Continua rodando com a tela apagada/minimizado
- * - Iniciado no app e (opcionalmente) após reboot via BootReceiver
  */
 class ForegroundLocationService : Service() {
 
@@ -57,14 +55,22 @@ class ForegroundLocationService : Service() {
 
         // 1) Canal + notificação fixa (obrigatório para foreground service de localização)
         createChannel()
-        startForeground(NOTI_ID, buildNotification("Rastreamento ativo"))
+        val notification = buildNotification("Rastreamento ativo")
+        try {
+            startForeground(NOTI_ID, notification)
+        } catch (e: SecurityException) {
+            // Em alguns aparelhos/fluxos sem POST_NOTIFICATIONS isso pode falhar.
+            Log.e(TAG, "startForeground falhou: ${e.message}")
+            stopSelf()
+            return
+        }
 
         // 2) Configuração do fornecedor de localização (intervalos ajustáveis)
         fused = LocationServices.getFusedLocationProviderClient(this)
-        req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 15_000L) // intervalo alvo: 15s
+        req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 15_000L) // alvo: 15s
             .setMinUpdateIntervalMillis(10_000L)   // mínimo entre updates
-            .setWaitForAccurateLocation(true)      // tenta melhorar a precisão quando possível
-            .setMaxUpdateDelayMillis(30_000L)      // coalescing para economia (até 30s)
+            .setWaitForAccurateLocation(true)      // tenta melhorar a precisão
+            .setMaxUpdateDelayMillis(30_000L)      // coalescing até 30s
             .build()
 
         // 3) Callback para cada atualização de localização
@@ -78,9 +84,9 @@ class ForegroundLocationService : Service() {
                         put("velocidade", if (loc.hasSpeed())  loc.speed.toDouble() else JSONObject.NULL)
                         put("rumo",      if (loc.hasBearing()) Math.round(loc.bearing) else JSONObject.NULL)
                     }
-                    // Envia como MOTORISTA (ajuste se quiser também passageiro)
+                    // Envia como MOTORISTA
                     sendToApi("/api/v1/motoristas/localizacoes.php", body)
-                    // Para enviar também do passageiro, descomente a linha abaixo:
+                    // Para enviar também do passageiro, descomente:
                     // sendToApi("/api/v1/passageiros/localizacoes.php", body)
                 }
             }
