@@ -11,13 +11,19 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
 
-    <!-- Localização em 2º plano (Android 10+) -->
+    <!-- Foreground Service (necessário para startForeground em Android 9+) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <!-- Android 12+ exige declarar o TIPO do foreground service -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
+
+    <!-- Localização em 2º plano (Android 10+).
+         OBS: Play Store exige justificativa forte. Mantenha apenas se realmente usar 24h -->
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
 
-    <!-- Receber evento de boot para subir o serviço -->
+    <!-- Receber evento de boot para subir o serviço (se realmente utilizar o receiver) -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
 
-    <!-- Android 13+: notificação p/ ForegroundService -->
+    <!-- Android 13+: permissão para mostrar a notificação do ForegroundService -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
     <application
@@ -58,7 +64,7 @@
             android:exported="false"
             android:foregroundServiceType="location" />
 
-        <!-- Receiver p/ iniciar serviço após boot -->
+        <!-- Receiver p/ iniciar serviço após boot (garanta que a classe exista) -->
         <receiver
             android:name=".location.BootReceiver"
             android:enabled="true"
