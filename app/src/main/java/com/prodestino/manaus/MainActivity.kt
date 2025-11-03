@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.net.http.SslError
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -13,8 +14,11 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.webkit.CookieManager
 import android.webkit.GeolocationPermissions
+import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -133,10 +137,19 @@ class MainActivity : AppCompatActivity() {
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
 
+        // ==== BLOCO COM TRATAMENTO DE ERROS (offline/404/SSL) ====
         webView.webViewClient = object : WebViewClient() {
+
+            private fun showOffline() {
+                // evita loop se já estamos na página local
+                if (webView.url?.startsWith("file:///android_asset/") == true) return
+                webView.loadUrl("file:///android_asset/offline.html")
+            }
+
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val uri = request.url
                 val host = uri.host ?: return false
+                // corrige hosts terminando com ponto
                 if (host.endsWith(".")) {
                     val fixed = Uri.Builder()
                         .scheme(uri.scheme ?: "https")
@@ -151,8 +164,39 @@ class MainActivity : AppCompatActivity() {
                 return false
             }
 
+            // HTTP 4xx/5xx (apenas no frame principal)
+            override fun onReceivedHttpError(
+                view: WebView,
+                request: WebResourceRequest,
+                errorResponse: WebResourceResponse
+            ) {
+                if (request.isForMainFrame && errorResponse.statusCode >= 400) {
+                    showOffline()
+                }
+            }
+
+            // Falhas de rede (sem internet, timeout, DNS…)
+            override fun onReceivedError(
+                view: WebView,
+                request: WebResourceRequest,
+                error: android.webkit.WebResourceError
+            ) {
+                if (request.isForMainFrame) showOffline()
+            }
+
+            // Erros SSL (cert inválido, data/hora errada…)
+            override fun onReceivedSslError(
+                view: WebView,
+                handler: SslErrorHandler,
+                error: SslError
+            ) {
+                handler.cancel()
+                showOffline()
+            }
+
             override fun onPageFinished(view: WebView, url: String) {
                 super.onPageFinished(view, url)
+                // Captura cookie da base para o serviço
                 try {
                     val base = BuildConfig.BASE_URL.ifBlank { "https://manaus.prodestino.com" }.trimEnd('/')
                     val cookie = CookieManager.getInstance().getCookie(base)
@@ -160,6 +204,7 @@ class MainActivity : AppCompatActivity() {
                 } catch (_: Exception) { /* ignore */ }
             }
         }
+        // ==== FIM DO BLOCO DE TRATAMENTO DE ERROS ====
 
         webView.webChromeClient = object : WebChromeClient() {
             override fun onGeolocationPermissionsShowPrompt(
