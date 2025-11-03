@@ -1,273 +1,114 @@
-// app/src/main/java/com/prodestino/manaus/MainActivity.kt
 package com.prodestino.manaus
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.content.ActivityNotFoundException
-import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.ConnectivityManager
-import android.net.Network
 import android.net.Uri
-import android.net.http.SslError
-import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
-import android.provider.MediaStore
-import android.view.WindowManager
+import android.webkit.CookieManager
 import android.webkit.GeolocationPermissions
-import android.webkit.PermissionRequest
-import android.webkit.SslErrorHandler
-import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
-import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.webkit.CookieManager
-import androidx.activity.ComponentActivity
-import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
-import com.prodestino.manaus.databinding.ActivityMainBinding
-import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
 
-    private lateinit var binding: ActivityMainBinding
-    private var fileCallback: ValueCallback<Array<Uri>>? = null
-    private var cameraUri: Uri? = null
+    private lateinit var webView: WebView
 
-    private val allowedHosts = setOfNotNull(
-        Uri.parse(BuildConfig.BASE_URL).host,
-        "manaus.prodestino.com"
-    )
-
-    private val askPerms = registerForActivityResult(
+    private val requestLocationPerms = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { /* ok */ }
+    ) { /* sem UI extra; o WebView vai tentar de novo quando a página pedir */ }
 
-    private val pickFile = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        val data = result.data
-        val results: Array<Uri>? = when {
-            result.resultCode != RESULT_OK -> null
-            data == null && cameraUri != null -> arrayOf(cameraUri!!)
-            data?.data != null -> arrayOf(data.data!!)
-            data?.clipData != null -> {
-                val count = data.clipData!!.itemCount
-                Array(count) { i -> data.clipData!!.getItemAt(i).uri }
-            }
-            else -> null
+    private fun ensureLocationPerms() {
+        val needFine = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.ACCESS_FINE_LOCATION
+        ) != PackageManager.PERMISSION_GRANTED
+        val needCoarse = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.ACCESS_COARSE_LOCATION
+        ) != PackageManager.PERMISSION_GRANTED
+
+        if (needFine || needCoarse) {
+            requestLocationPerms.launch(arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ))
         }
-        fileCallback?.onReceiveValue(results ?: emptyArray())
-        fileCallback = null
-        cameraUri = null
     }
-
-    private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
-    private val homeUrl by lazy { BuildConfig.BASE_URL }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        webView = WebView(this)
+        setContentView(webView)
 
-        // Anti-print
-        window.setFlags(
-            WindowManager.LayoutParams.FLAG_SECURE,
-            WindowManager.LayoutParams.FLAG_SECURE
-        )
+        ensureLocationPerms()
 
-        enableEdgeToEdge()
-        binding = ActivityMainBinding.inflate(layoutInflater)
-        setContentView(binding.root)
+        val settings = webView.settings
+        settings.javaScriptEnabled = true
+        settings.domStorageEnabled = true
+        settings.databaseEnabled = true
+        // habilita geolocalização para JS
+        settings.setGeolocationEnabled(true)
+        settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+        settings.mediaPlaybackRequiresUserGesture = false
+        settings.userAgentString = settings.userAgentString + " ProDestinoWebView/1.0"
 
-        // Imersivo
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-        val insets = WindowInsetsControllerCompat(window, binding.root)
-        insets.hide(WindowInsetsCompat.Type.systemBars())
-        insets.systemBarsBehavior =
-            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        // cookies/sessão (PHPSESSID)
+        CookieManager.getInstance().setAcceptCookie(true)
+        CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
 
-        val wv = binding.webview
-        with(wv.settings) {
-            javaScriptEnabled = true
-            domStorageEnabled = true
-            databaseEnabled = true
-            mediaPlaybackRequiresUserGesture = false
-            allowFileAccess = true
-            allowContentAccess = true
-            cacheMode = WebSettings.LOAD_DEFAULT
-            mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-        }
-        CookieManager.getInstance().apply {
-            setAcceptCookie(true)
-            setAcceptThirdPartyCookies(wv, true)
-        }
-        if (BuildConfig.WEBVIEW_DEBUG) {
-            WebView.setWebContentsDebuggingEnabled(true)
-        }
-
-        wv.webViewClient = object : WebViewClient() {
-
+        // Garante que URLs com ponto final NÃO sejam usadas
+        webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(
-                view: WebView, request: WebResourceRequest
+                view: WebView,
+                request: WebResourceRequest
             ): Boolean {
-                val h = request.url.host ?: return false
-                return if (allowedHosts.contains(h)) {
-                    false
-                } else {
-                    startActivity(Intent(Intent.ACTION_VIEW, request.url))
-                    true
-                }
-            }
+                val url = request.url.toString()
+                val uri = request.url
+                val host = uri.host ?: return false
 
-            override fun onReceivedError(
-                view: WebView, request: WebResourceRequest, error: WebResourceError
-            ) {
-                if (request.isForMainFrame) {
-                    view.loadUrl("file:///android_asset/offline.html")
-                    scheduleAutoRetry()
+                // se vier "manaus.prodestino.com." → redireciona para sem ponto
+                if (host.endsWith(".")) {
+                    val fixed = Uri.Builder()
+                        .scheme(uri.scheme ?: "https")
+                        .encodedAuthority(host.trimEnd('.'))
+                        .encodedPath(uri.encodedPath)
+                        .encodedQuery(uri.encodedQuery)
+                        .build()
+                        .toString()
+                    view.loadUrl(fixed)
+                    return true
                 }
-            }
-
-            override fun onReceivedHttpError(
-                view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse
-            ) {
-                if (request.isForMainFrame) {
-                    view.loadUrl("file:///android_asset/offline.html")
-                    scheduleAutoRetry()
-                }
-            }
-
-            override fun onReceivedSslError(
-                view: WebView, handler: SslErrorHandler, error: SslError
-            ) {
-                handler.cancel()
-                view.loadUrl("file:///android_asset/offline.html")
-                scheduleAutoRetry()
+                return false
             }
         }
 
-        wv.webChromeClient = object : WebChromeClient() {
-            override fun onPermissionRequest(request: PermissionRequest?) {
-                runOnUiThread {
-                    val host = request?.origin?.host
-                    if (host != null && allowedHosts.contains(host)) {
-                        request.grant(request.resources)
-                    } else request?.deny()
-                }
-            }
-
+        // Autoriza geolocalização automaticamente só para o seu domínio
+        webView.webChromeClient = object : WebChromeClient() {
             override fun onGeolocationPermissionsShowPrompt(
-                origin: String?, callback: GeolocationPermissions.Callback?
+                origin: String?,
+                callback: GeolocationPermissions.Callback?
             ) {
-                // Permite geolocalização do site apenas para hosts permitidos (em primeiro plano)
-                val host = origin?.let { Uri.parse(it).host }
-                callback?.invoke(origin, host != null && allowedHosts.contains(host), false)
-            }
-
-            override fun onShowFileChooser(
-                webView: WebView?, filePathCallback: ValueCallback<Array<Uri>>?,
-                fileChooserParams: FileChooserParams?
-            ): Boolean {
-                fileCallback?.onReceiveValue(emptyArray())
-                fileCallback = filePathCallback
-
-                val contentIntent = Intent(Intent.ACTION_GET_CONTENT).apply {
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                    type = "*/*"
-                    putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "video/*"))
-                }
-
-                val photoFile = createTempImageFile()
-                cameraUri = FileProvider.getUriForFile(
-                    this@MainActivity,
-                    "${BuildConfig.APPLICATION_ID}.fileprovider",
-                    photoFile
-                )
-                val cameraIntent = Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
-                    putExtra(MediaStore.EXTRA_OUTPUT, cameraUri)
-                    addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-
-                val chooser = Intent(Intent.ACTION_CHOOSER).apply {
-                    putExtra(Intent.EXTRA_INTENT, contentIntent)
-                    putExtra(Intent.EXTRA_TITLE, "Selecionar arquivo")
-                    putExtra(Intent.EXTRA_INITIAL_INTENTS, arrayOf(cameraIntent))
-                }
-
-                return try {
-                    pickFile.launch(chooser); true
-                } catch (_: ActivityNotFoundException) {
-                    fileCallback?.onReceiveValue(emptyArray()); fileCallback = null
-                    false
-                }
+                val allow = origin?.startsWith("https://manaus.prodestino.com") == true
+                callback?.invoke(origin, allow, false)
             }
         }
 
-        // Volta automático quando a rede reaparece
-        val cmgr = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        cmgr.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: Network) {
-                runOnUiThread {
-                    if (wv.url?.startsWith("file:///android_asset/offline.html") == true) {
-                        wv.loadUrl(homeUrl)
-                    }
-                }
-            }
-        })
-
-        // Solicitar somente as permissões necessárias para câmera/áudio e (opcional) geolocalização do site
-        askPerms.launch(arrayOf(
-            Manifest.permission.CAMERA,
-            Manifest.permission.RECORD_AUDIO,
-            Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.ACCESS_FINE_LOCATION
-        ))
-
-        wv.loadUrl(homeUrl)
-    }
-
-    private fun scheduleAutoRetry() {
-        mainHandler.removeCallbacksAndMessages(null)
-        mainHandler.postDelayed({
-            if (!isFinishing && !isDestroyed) {
-                binding.webview.loadUrl(homeUrl)
-            }
-        }, 3500L)
-    }
-
-    private fun createTempImageFile(): File {
-        val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-        val dir = File(cacheDir, "camera_cache").apply { mkdirs() }
-        return File.createTempFile("JPEG_${ts}_", ".jpg", dir)
+        // URL base do seu sistema (sem barra/ponto no final)
+        val startUrl = BuildConfig.BASE_URL.ifBlank { "https://manaus.prodestino.com" }
+        webView.loadUrl(startUrl)
     }
 
     override fun onBackPressed() {
-        val wv = binding.webview
-        if (wv.canGoBack()) wv.goBack() else super.onBackPressed()
-    }
-
-    override fun onWindowFocusChanged(hasFocus: Boolean) {
-        super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) {
-            val insets = WindowInsetsControllerCompat(window, binding.root)
-            insets.hide(WindowInsetsCompat.Type.systemBars())
-            insets.systemBarsBehavior =
-                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        if (this::webView.isInitialized && webView.canGoBack()) {
+            webView.goBack()
+        } else {
+            super.onBackPressed()
         }
     }
 }
