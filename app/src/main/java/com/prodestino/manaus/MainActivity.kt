@@ -12,11 +12,11 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
+import android.view.View
 import android.webkit.CookieManager
 import android.webkit.GeolocationPermissions
 import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
-import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
@@ -31,22 +31,32 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
 
-    // Flags de estado para evitar loops
+    // Flags de estado
     private var bootCompletedOnce = false
     private var resumed = false
+
+    // Serviço só inicia quando a página real estiver pronta
+    private var pageReady = false
+    private var serviceStarted = false
 
     private val ui = Handler(Looper.getMainLooper())
 
     // ===== Helpers de permissão =====
     private fun hasFineOrCoarse(): Boolean {
-        val fine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        val coarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val fine = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val coarse = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
         return fine || coarse
     }
 
     private fun hasNotifPermission(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+            ContextCompat.checkSelfPermission(
+                this, Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
         } else true
     }
 
@@ -54,14 +64,14 @@ class MainActivity : AppCompatActivity() {
     private val reqForegroundPerms = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) {
-        // Depois que o usuário responde, tentamos avançar
+        // Depois que o usuário responde, apenas reavaliamos condições
+        maybeStartService()
         proceedIfReady()
     }
 
     private val reqNotifPerm = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) {
-        // Depois que o usuário responde, tentamos avançar
         proceedIfReady()
     }
 
@@ -86,7 +96,7 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * Centro do fluxo: só avança quando:
-     *  - activity em primeiro plano (resumed == true),
+     *  - activity em primeiro plano,
      *  - localização foreground OK,
      *  - (Android 13+) notificação OK.
      */
@@ -100,10 +110,11 @@ class MainActivity : AppCompatActivity() {
 
         if (!bootCompletedOnce) {
             bootCompletedOnce = true
-            // Pequeno atraso impede crashes em alguns OEMs (serviço iniciado cedo demais)
+            // Pequeno atraso impede crashes em alguns OEMs
             ui.postDelayed({
                 initWebViewIfNeeded()
-                startTrackingServiceSafely()
+                // NÃO iniciamos o serviço aqui — quem dispara é maybeStartService()
+                maybeStartService()
             }, 350L)
         }
     }
@@ -115,6 +126,22 @@ class MainActivity : AppCompatActivity() {
                 .edit()
                 .putString("web_cookie", cookie)
                 .apply()
+        }
+    }
+
+    // Dispara o serviço se (e só se) a página real já carregou e a permissão existe
+    private fun maybeStartService() {
+        if (serviceStarted) return
+        if (!pageReady) return
+        if (!hasFineOrCoarse()) return
+        try {
+            ForegroundLocationService.start(this)
+            serviceStarted = true
+        } catch (_: Throwable) {
+            // Se algum OEM bloquear, tenta 1s depois
+            ui.postDelayed({
+                try { ForegroundLocationService.start(this); serviceStarted = true } catch (_: Throwable) {}
+            }, 1000L)
         }
     }
 
@@ -141,15 +168,18 @@ class MainActivity : AppCompatActivity() {
         webView.webViewClient = object : WebViewClient() {
 
             private fun showOffline() {
-                // evita loop se já estamos na página local
+                // Evita loop se já estamos na página local
                 if (webView.url?.startsWith("file:///android_asset/") == true) return
                 webView.loadUrl("file:///android_asset/offline.html")
             }
 
-            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+            override fun shouldOverrideUrlLoading(
+                view: WebView,
+                request: WebResourceRequest
+            ): Boolean {
                 val uri = request.url
                 val host = uri.host ?: return false
-                // corrige hosts terminando com ponto
+                // Corrige hosts terminando com ponto
                 if (host.endsWith(".")) {
                     val fixed = Uri.Builder()
                         .scheme(uri.scheme ?: "https")
@@ -196,12 +226,17 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageFinished(view: WebView, url: String) {
                 super.onPageFinished(view, url)
+
                 // Captura cookie da base para o serviço
                 try {
                     val base = BuildConfig.BASE_URL.ifBlank { "https://manaus.prodestino.com" }.trimEnd('/')
                     val cookie = CookieManager.getInstance().getCookie(base)
                     saveWebCookie(cookie)
                 } catch (_: Exception) { /* ignore */ }
+
+                // Considera "pronto" somente quando for sua URL HTTPS (não os assets locais)
+                pageReady = url.startsWith("https://manaus.prodestino.com")
+                maybeStartService()
             }
         }
         // ==== FIM DO BLOCO DE TRATAMENTO DE ERROS ====
@@ -223,32 +258,19 @@ class MainActivity : AppCompatActivity() {
         webView.loadUrl(startUrl)
     }
 
-    private fun startTrackingServiceSafely() {
-        try {
-            // IMPORTANTE: só iniciar com a Activity em foreground e após o pequeno delay
-            ForegroundLocationService.start(this)
-        } catch (_: Throwable) {
-            // Falha em OEM? Tenta de novo depois de 1s.
-            ui.postDelayed({
-                try { ForegroundLocationService.start(this) } catch (_: Throwable) {}
-            }, 1000L)
-        }
-    }
-
     // ===== Ciclo de vida =====
-    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Não carrega a WebView ainda; primeiro resolvemos as permissões
+        // Primeiro as permissões; o WebView vem depois
         ensureForegroundLocationOnce()
         askIgnoreBatteryOptimizations()
-        // Se o usuário já tinha concedido antes, pode seguir assim que o onResume sinalizar foreground
     }
 
     override fun onResume() {
         super.onResume()
         resumed = true
+        hideSystemBars()
         proceedIfReady()
     }
 
@@ -257,11 +279,29 @@ class MainActivity : AppCompatActivity() {
         resumed = false
     }
 
+    @Suppress("DEPRECATION")
     override fun onBackPressed() {
         if (this::webView.isInitialized && webView.canGoBack()) webView.goBack()
         else super.onBackPressed()
     }
 
+    // Esconde barra de navegação (imersivo)
+    private fun hideSystemBars() {
+        if (Build.VERSION.SDK_INT >= 30) {
+            window.insetsController?.let { c ->
+                c.hide(android.view.WindowInsets.Type.navigationBars())
+                c.systemBarsBehavior =
+                    android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility =
+                (View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY)
+        }
+    }
+
+    // Pede para ignorar otimização de bateria (ajuda no background)
     private fun askIgnoreBatteryOptimizations() {
         try {
             val pm = getSystemService(POWER_SERVICE) as PowerManager
