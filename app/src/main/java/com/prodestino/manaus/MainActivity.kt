@@ -129,11 +129,16 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Dispara o serviço se (e só se) a página real já carregou e a permissão existe
+    // Dispara o serviço se (e só se) a página real já carregou e as permissões exigidas existem
     private fun maybeStartService() {
         if (serviceStarted) return
         if (!pageReady) return
         if (!hasFineOrCoarse()) return
+        // No Android 13+, garanta permissão de notificação ANTES do serviço
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasNotifPermission()) {
+            ensureNotificationPermIfNeeded()
+            return
+        }
         try {
             ForegroundLocationService.start(this)
             serviceStarted = true
@@ -272,6 +277,15 @@ class MainActivity : AppCompatActivity() {
         resumed = true
         hideSystemBars()
         proceedIfReady()
+
+        // Se estivermos na tela offline local e a activity voltou, tente recarregar o site
+        if (this::webView.isInitialized) {
+            val u = webView.url ?: ""
+            if (u.startsWith("file:///android_asset/")) {
+                val startUrl = BuildConfig.BASE_URL.ifBlank { "https://manaus.prodestino.com" }
+                webView.post { webView.loadUrl(startUrl) }
+            }
+        }
     }
 
     override fun onPause() {
