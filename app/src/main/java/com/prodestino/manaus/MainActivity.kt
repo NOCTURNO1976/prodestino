@@ -35,13 +35,44 @@ class MainActivity : AppCompatActivity() {
             val coarseOk = grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true
             if (fineOk || coarseOk) askBackgroundIfNeeded()
         }
+        // Depois de lidar com localização, checa/solicita notificação e inicia o serviço
+        ensureNotificationPermThenStartService()
     }
 
     private val reqBackgroundPerm = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { /* sem UI extra; serviço/WebView tentam novamente depois */ }
+    ) { /* sem UI extra; serviço/WebView tentam novamente depois */
+        // Em qualquer caso, garanta que o serviço possa iniciar se as notificações estiverem ok
+        ensureNotificationPermThenStartService()
+    }
 
-    // Pede as permissões necessárias
+    // --- Launcher para pedir a permissão de NOTIFICAÇÃO (Android 13+) ---
+    private val reqNotifPerm = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        // Se concedido, podemos iniciar o serviço com segurança
+        if (granted) {
+            ForegroundLocationService.start(this)
+        }
+        // Se negar, seguimos sem serviço em 2º plano (WebView continua em 1º plano)
+    }
+
+    // Pede POST_NOTIFICATIONS em Android 13+ antes de iniciar o serviço
+    private fun ensureNotificationPermThenStartService() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val has = ContextCompat.checkSelfPermission(
+                this, Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!has) {
+                reqNotifPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
+                return
+            }
+        }
+        // Versões < 13 ou já tem permissão -> inicia
+        ForegroundLocationService.start(this)
+    }
+
+    // Pede as permissões necessárias (Fine/Coarse e, opcionalmente, Background)
     private fun ensureLocationPerms() {
         val needsFine = ContextCompat.checkSelfPermission(
             this, Manifest.permission.ACCESS_FINE_LOCATION
@@ -58,6 +89,8 @@ class MainActivity : AppCompatActivity() {
         } else {
             // Já tem foreground; se quiser background contínuo, pede depois (Android 10+)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) askBackgroundIfNeeded()
+            // E garante a partida do serviço (checa notificação)
+            ensureNotificationPermThenStartService()
         }
     }
 
@@ -150,9 +183,7 @@ class MainActivity : AppCompatActivity() {
         // 3) Carrega sua URL (sem ponto no final)
         val startUrl = BuildConfig.BASE_URL.ifBlank { "https://manaus.prodestino.com" }
         webView.loadUrl(startUrl)
-
-        // 4) Inicia serviço de rastreamento (foreground) ao abrir o app
-        ForegroundLocationService.start(this)
+        // OBS: o serviço só é iniciado após as checagens de permissão (ver ensureLocationPerms/ensureNotificationPermThenStartService)
     }
 
     override fun onDestroy() {
