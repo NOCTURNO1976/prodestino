@@ -11,5 +11,5 @@
         android:layout_height="match_parent"
         android:contentDescription="@string/app_name"
         android:scaleType="centerInside"
-        android:src="@mipmap/ic_launcher_round" />
+        android:src="@mipmap/ic_launcher" />
 </FrameLayout>
