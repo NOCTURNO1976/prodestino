@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="pt-br">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Reconectando…</title>
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<style>
+  body{font-family:system-ui,Arial,sans-serif;margin:0;display:grid;place-items:center;height:100vh;background:#f7f7f7}
+  .card{max-width:460px;padding:24px;text-align:center;border-radius:16px;box-shadow:0 8px 30px rgba(0,0,0,.08);background:#fff}
+  h1{font-size:18px;margin:0 0 8px}
+  p{color:#555;margin:0 0 16px}
+  .row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  button{padding:10px 14px;border:0;border-radius:12px;cursor:pointer}
+  .primary{background:#0a7cff;color:#fff}
+  .soft{background:#eee}
+  small{display:block;margin-top:10px;color:#777}
+</style>
+
+<div class="card">
+  <h1>Sem conexão</h1>
+  <p>Estamos tentando reconectar…</p>
+  <div class="row">
+    <button class="primary" id="tryNowBtn">Tentar agora</button>
+    <button class="soft" id="hardReloadBtn">Forçar atualização</button>
+    <button class="soft" id="clearCacheBtn">Corrigir cache</button>
+  </div>
+  <small id="status">Aguardando rede…</small>
+</div>
+
+<script>
+(() => {
+  // ===== CONFIGURÁVEL =====
+  // Página de destino ao voltar (a raiz do seu site/app):
+  const HOME = location.origin + '/';
+  // Endpoints para "ping" (o primeiro que responder 200 destrava):
+  const PROBES = [
+    HOME + 'health',
+    HOME + 'favicon.ico',
+    HOME + '?__ping__=' + Date.now()
+  ];
+  // Timeout por tentativa (ms) e intervalo entre varreduras automáticas (ms):
+  const FETCH_TIMEOUT = 4000;
+  const INTERVAL_MS   = 4000;
+
+  const $status = document.getElementById('status');
+  const $tryNow = document.getElementById('tryNowBtn');
+  const $hard   = document.getElementById('hardReloadBtn');
+  const $clear  = document.getElementById('clearCacheBtn');
+
+  function setStatus(msg) { if ($status) $status.textContent = msg; }
+
+  function timeout(ms) {
+    return new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms));
+  }
+
+  async function probeOnce() {
+    // Teste real de rede com cache desativado
+    for (const url of PROBES) {
+      try {
+        setStatus('Verificando: ' + new URL(url).pathname);
+        const res = await Promise.race([
+          fetch(url, {
+            method: 'GET',
+            cache: 'no-store',
+            credentials: 'include',
+            headers: { 'Pragma': 'no-cache', 'Cache-Control': 'no-store' }
+          }),
+          timeout(FETCH_TIMEOUT)
+        ]);
+        if (res && res.ok) return true;
+      } catch (e) {
+        // continua para o próximo
+      }
+    }
+    return false;
+  }
+
+  function hardNavigate() {
+    // Reload "duro" com cache-buster para fugir de SW/cache preso
+    const bust = HOME + (HOME.includes('?') ? '&' : '?') + 'r=' + Date.now();
+    // Preferimos replace para não "grudar" a tela offline no histórico
+    location.replace(bust);
+  }
+
+  async function clearCachesAndUpdateSW() {
+    try {
+      // Apaga caches do Cache Storage (se o SW estiver usando cache nomeado, isso ajuda)
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k => caches.delete(k)));
+      }
+      // Pede pro Service Worker se atualizar (não desinstala, só busca versão nova)
+      if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map(r => r.update()));
+      }
+      setStatus('Caches limpos. Tentando novamente…');
+    } catch (e) {
+      setStatus('Falha ao limpar cache: ' + (e && e.message ? e.message : e));
+    }
+  }
+
+  async function tryReconnect() {
+    // Se o navegador disser que está offline, ainda assim tentamos o probe (captive portals confundem)
+    const ok = await probeOnce();
+    if (ok) hardNavigate();
+    return ok;
+  }
+
+  let ticking = false;
+  async function loop() {
+    if (ticking) return;
+    ticking = true;
+    try {
+      const ok = await tryReconnect();
+      if (!ok) setStatus('Sem resposta do servidor. Nova tentativa em ' + (INTERVAL_MS/1000) + 's…');
+    } finally {
+      ticking = false;
+    }
+  }
+
+  // Botões
+  $tryNow?.addEventListener('click', loop);
+  $hard?.addEventListener('click', () => {
+    clearCachesAndUpdateSW().finally(hardNavigate);
+  });
+  $clear?.addEventListener('click', () => {
+    clearCachesAndUpdateSW();
+  });
+
+  // Varredura automática
+  setStatus('Aguardando rede…');
+  loop(); // tenta já na entrada
+  setInterval(loop, INTERVAL_MS);
+
+  // Dica: se um SW controlar esta página, peça atualização imediatamente
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.ready
+      .then(reg => reg.update())
+      .catch(() => {});
+  }
+})();
+</script>
+</html>
