@@ -18,7 +18,7 @@
 
     <!-- Localização em 2º plano (Android 10+).
          Se realmente usar rastreio 24h, mantenha. Caso contrário, REMOVA para facilitar a aprovação na Play. -->
-    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
+    <!-- <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>  -->
 
     <!-- Receber evento de boot para subir o serviço (se realmente utilizar o receiver) -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
