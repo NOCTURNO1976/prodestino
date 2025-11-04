@@ -80,8 +80,7 @@
         <!-- **Serviço da bolha/overlay** (foreground p/ estabilidade) -->
         <service
             android:name=".overlay.OverlayService"
-            android:exported="false"
-            android:foregroundServiceType="none" />
+            android:exported="false" />
 
         <!-- Receiver de boot/atualização do app -->
         <!--
