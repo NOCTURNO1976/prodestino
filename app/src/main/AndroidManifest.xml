@@ -11,22 +11,21 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
 
-    <!-- Foreground Service (necessário para startForeground em Android 9+) -->
+    <!-- Foreground Service (Android 9+) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
-    <!-- Android 12+ exige declarar o TIPO do foreground service -->
+    <!-- Android 12+ exige o tipo -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
 
-    <!-- Localização em 2º plano (Android 10+).
-         Se realmente usar rastreio 24h, mantenha. Caso contrário, REMOVA para facilitar a aprovação na Play. -->
-    <!-- <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>  -->
+    <!-- Localização em 2º plano (REMOVA se não usar rastreio 24h) -->
+    <!-- <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/> -->
 
-    <!-- Receber evento de boot para subir o serviço (se realmente utilizar o receiver) -->
+    <!-- Receber boot (se usar BootReceiver) -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
 
-    <!-- Android 13+: permissão para mostrar notificações do ForegroundService -->
+    <!-- Android 13+: notificações para o ForegroundService -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
-    <!-- EVITAR filtro de dispositivos na Play (câmera/microfone não-obrigatórios) -->
+    <!-- Evitar filtro de dispositivos na Play -->
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
     <uses-feature android:name="android.hardware.microphone" android:required="false"/>
 
@@ -39,7 +38,7 @@
         android:networkSecurityConfig="@xml/network_security_config"
         android:allowBackup="false">
 
-        <!-- FileProvider p/ câmera/upload -->
+        <!-- FileProvider para uploads/câmera -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -56,7 +55,7 @@
             android:exported="true"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:screenOrientation="portrait"
-            android:hardwareAccelerated="false"> <!-- coerente com a blindagem no código -->
+            android:hardwareAccelerated="true"> <!-- habilita HW accel para evitar desalinhamento -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
@@ -69,7 +68,7 @@
             android:exported="false"
             android:foregroundServiceType="location" />
 
-        <!-- Receiver p/ iniciar serviço após boot (garanta que a classe exista) -->
+        <!-- Receiver opcional (se existir a classe) -->
         <receiver
             android:name=".location.BootReceiver"
             android:enabled="true"
