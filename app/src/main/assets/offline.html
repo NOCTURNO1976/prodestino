@@ -8,88 +8,54 @@
   <title>Offline</title>
   <style>
     :root{
-      --bg: #0b1220;
-      --fg: #e5f0ff;
-      --muted:#98a2b3;
-      --accent:#0ea5e9;
-      --ring:#60a5fa33;
-      --card:#0f172a;
-      --shadow: 0 10px 30px rgba(0,0,0,.25);
-      --btn-bg:#0ea5e9;
-      --btn-fg:#ffffff;
-      --btn-bg-ok:#10b981;
+      --bg:#0b1220; --fg:#e5f0ff; --muted:#98a2b3; --accent:#0ea5e9;
+      --ring:#60a5fa33; --card:#0f172a; --shadow:0 10px 30px rgba(0,0,0,.25);
+      --btn:#0ea5e9; --btn-ok:#10b981; --btn-fg:#fff;
     }
     @media (prefers-color-scheme: light){
       :root{
-        --bg:#f8fafc;
-        --fg:#0f172a;
-        --muted:#64748b;
-        --accent:#0284c7;
-        --ring:#0284c71f;
-        --card:#ffffff;
-        --shadow: 0 10px 30px rgba(2,8,23,.08);
-        --btn-bg:#0284c7;
-        --btn-fg:#ffffff;
-        --btn-bg-ok:#059669;
+        --bg:#f8fafc; --fg:#0f172a; --muted:#64748b; --accent:#0284c7;
+        --ring:#0284c71f; --card:#ffffff; --shadow:0 10px 30px rgba(2,8,23,.08);
+        --btn:#0284c7; --btn-ok:#059669; --btn-fg:#fff;
       }
     }
-
-    * { box-sizing: border-box; }
-    html, body { height: 100%; }
-    body {
-      margin: 0;
-      background: radial-gradient(1200px 800px at 50% -100px, var(--ring), transparent 60%), var(--bg);
-      color: var(--fg);
-      font: 500 16px/1.4 system-ui,-apple-system, Segoe UI, Roboto, Ubuntu, Cantarell,"Helvetica Neue", Arial,"Noto Sans","Apple Color Emoji","Segoe UI Emoji";
-      display: grid;
-      place-items: center;
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0; background: radial-gradient(1200px 800px at 50% -100px, var(--ring), transparent 60%), var(--bg);
+      color:var(--fg); font:500 16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Helvetica Neue,Arial,Noto Sans,Apple Color Emoji,Segoe UI Emoji;
+      display:grid; place-items:center;
     }
-
-    .card {
-      width: min(560px, 92vw);
-      background: var(--card);
-      border-radius: 20px;
-      box-shadow: var(--shadow);
-      padding: 28px 28px 32px;
-      text-align: center;
-      border: 1px solid rgba(255,255,255,.06);
+    .card{
+      width:min(560px,92vw); background:var(--card); border-radius:20px; box-shadow:var(--shadow);
+      padding:28px 28px 32px; text-align:center; border:1px solid rgba(255,255,255,.06);
     }
-    .art {
-      width: 140px; height: 140px; margin: 8px auto 18px; position: relative;
-      filter: drop-shadow(0 6px 16px rgba(0,0,0,.25));
-    }
-    .pulse { animation: pulse 2.4s ease-in-out infinite; transform-origin: 50% 50%; }
-    @keyframes pulse { 0%{transform:scale(1);opacity:1}50%{transform:scale(1.04);opacity:.96}100%{transform:scale(1);opacity:1} }
-    .wave { animation: wave 2.4s ease-in-out infinite; }
-    @keyframes wave { 0%{opacity:.35;transform:translateY(0)}50%{opacity:.12;transform:translateY(4px)}100%{opacity:.35;transform:translateY(0)} }
-
-    h1 { font-size: clamp(20px, 3.8vw, 28px); margin: 0 0 6px; letter-spacing: .2px; }
-    p { margin: 8px 0 0; color: var(--muted); }
-
-    .status-line{ margin-top:16px; font-weight:700; display:flex; gap:8px; justify-content:center; align-items:baseline; flex-wrap:wrap; }
-    .dots{ letter-spacing:.15em; opacity:.85 }
-    .nums{ font-variant-numeric: tabular-nums; display:inline-flex; gap:6px; align-items:center; }
-    .num{
-      display:inline-block; min-width:1.2ch; font-size:28px; line-height:1;
-      padding:6px 10px; border-radius:10px;
-      background: linear-gradient(180deg, rgba(14,165,233,.14), rgba(14,165,233,.06));
-      border: 1px solid rgba(14,165,233,.25); color: var(--accent);
-      box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
-    }
-
-    .foot { margin-top: 18px; font-size: 13px; color: var(--muted); opacity: .9; }
-
-    .actions { margin-top: 18px; display:flex; justify-content:center; }
+    .art{width:140px;height:140px;margin:8px auto 18px;filter:drop-shadow(0 6px 16px rgba(0,0,0,.25))}
+    .pulse{animation:pulse 2.4s ease-in-out infinite; transform-origin:50% 50%}
+    @keyframes pulse{0%{transform:scale(1);opacity:1}50%{transform:scale(1.04);opacity:.96}100%{transform:scale(1);opacity:1}}
+    .wave{animation:wave 2.4s ease-in-out infinite}
+    @keyframes wave{0%{opacity:.35;transform:translateY(0)}50%{opacity:.12;transform:translateY(4px)}100%{opacity:.35;transform:translateY(0)}}
+    h1{font-size:clamp(20px,3.8vw,28px);margin:0 0 6px}
+    p{margin:8px 0 0;color:var(--muted)}
+    .actions{margin-top:18px;display:flex;justify-content:center}
     .btn{
-      display:inline-flex; align-items:center; justify-content:center; gap:.5rem;
-      font-weight:800; padding:12px 16px; border-radius:12px; border:none; cursor:pointer;
-      background: var(--btn-bg); color: var(--btn-fg); box-shadow: var(--shadow);
-      transition: transform .08s ease, opacity .2s ease, background .2s ease;
+      display:inline-flex;align-items:center;justify-content:center;gap:.5rem;
+      font-weight:800;padding:12px 16px;border-radius:12px;border:none;cursor:pointer;
+      background:var(--btn);color:var(--btn-fg);box-shadow:var(--shadow);
+      transition:transform .08s ease,opacity .2s ease,background .2s ease,box-shadow .2s ease;
     }
-    .btn:active{ transform: translateY(1px); }
-    .btn[disabled]{ opacity:.5; pointer-events:none; }
-    .btn-ok{ background: var(--btn-bg-ok); }
-    .hide{ display:none !important; }
+    .btn:active{transform:translateY(1px)}
+    .btn[disabled]{opacity:.6;pointer-events:none}
+    .btn-ok{background:var(--btn-ok)}
+    .shake{animation:shake .3s ease}
+    @keyframes shake{
+      10%,90%{transform:translateX(-1px)}
+      20%,80%{transform:translateX(2px)}
+      30%,50%,70%{transform:translateX(-4px)}
+      40%,60%{transform:translateX(4px)}
+    }
+    .hint{margin-top:10px;font-size:13px;color:var(--muted);opacity:.95}
+    .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
   </style>
 </head>
 <body>
@@ -114,123 +80,99 @@
     </div>
 
     <h1>Sem conexão</h1>
-    <p>Fique tranquilo — estamos tentando reconectar.</p>
-
-    <div class="status-line" id="statusLine" aria-live="polite" aria-atomic="true">
-      <span class="dots">Tentando conexão…</span>
-      <span class="nums" id="nums">
-        <span class="num">5</span><span class="num">4</span><span class="num">3</span><span class="num">2</span><span class="num">1</span>
-      </span>
-    </div>
+    <p>Toque em “Reconectar” para tentar voltar.</p>
 
     <div class="actions">
-      <button id="backBtn" class="btn btn-ok hide" type="button" aria-label="Voltar para a página anterior">✅ Voltar para a página anterior</button>
+      <button id="retryBtn" class="btn" type="button" aria-describedby="hint">🔄 Reconectar</button>
     </div>
+    <p id="hint" class="hint">Se houver internet, retorna automaticamente à página anterior.</p>
 
-    <p class="foot" id="footHelp">O botão aparece assim que a internet voltar.</p>
+    <span id="live" class="sr-only" aria-live="polite" aria-atomic="true"></span>
   </main>
 
   <script>
     (function(){
       'use strict';
 
-      // ===== Animação do "5.4.3.2.1" (loop visual)
-      const seq = [5,4,3,2,1];
-      const $nums = document.getElementById('nums');
-      let off = 0;
-      setInterval(() => {
-        off = (off + 1) % seq.length;
-        const ordered = seq.slice(off).concat(seq.slice(0, off));
-        const kids = $nums.children;
-        for (let i = 0; i < kids.length; i++) kids[i].textContent = ordered[i] || '';
-      }, 1000);
+      const ORIGIN_PING = '/';     // você pode trocar por um arquivo estático do seu domínio
+      const live = document.getElementById('live');
+      const btn  = document.getElementById('retryBtn');
 
-      const backBtn = document.getElementById('backBtn');
-      const footHelp = document.getElementById('footHelp');
-      let shown = false;
+      function speak(msg){ try{ live.textContent = msg; }catch(e){} }
 
-      function showBack(){
-        if (shown) return;
-        shown = true;
-        backBtn.classList.remove('hide');
-        try { backBtn.focus({ preventScroll: true }); } catch(e){}
-        if (footHelp) footHelp.textContent = 'Conexão restabelecida. Toque para voltar.';
-        try { if (navigator.vibrate) navigator.vibrate([120,60,120]); } catch(e){}
-      }
+      // Probe 1: navigator.onLine (rápido, mas nem sempre confiável)
+      function isOnlineHint(){ return typeof navigator.onLine === 'boolean' ? navigator.onLine : false; }
 
-      function goBack(){
-        try { history.back(); } catch(e){}
-      }
-      backBtn.addEventListener('click', goBack);
-      backBtn.addEventListener('keydown', e => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); goBack(); }
-      });
-
-      // ===== 1) Evento nativo (pode não disparar em WebView)
-      window.addEventListener('online', showBack, { once: true });
-
-      // ===== 2) Pings ativos (funcionam mesmo com SW/WebView teimoso)
-      const ORIGIN_PING = '/'; // qualquer asset do seu domínio também serve
-      const POLL_MS = 1200;
-
-      // Fetch HEAD (no-cors) — sucesso = não lança erro de rede
+      // Probe 2: fetch HEAD (no-cors) — se não der erro de rede, consideramos OK
       async function fetchProbe(url){
         const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 2500);
-        try {
-          await fetch(url, {
-            method: 'HEAD',
-            cache: 'no-store',
-            mode: 'no-cors',     // evita CORS bloquear
-            credentials: 'omit',
-            signal: ctrl.signal
-          });
+        const t = setTimeout(()=>ctrl.abort(), 2500);
+        try{
+          await fetch(url, { method:'HEAD', mode:'no-cors', cache:'no-store', credentials:'omit', signal:ctrl.signal });
           clearTimeout(t);
-          return true; // se não explodiu, consideramos OK
-        } catch(e){
+          return true; // sem erro de rede
+        }catch(e){
           clearTimeout(t);
           return false;
         }
       }
 
-      // Ping por <img> (ignora CORS totalmente)
-      function imgProbe(url, timeoutMs = 3000){
-        return new Promise(resolve => {
+      // Probe 3: ping por <img> (ignora CORS e muitos proxies)
+      function imgProbe(url, timeoutMs=3000){
+        return new Promise(resolve=>{
           const img = new Image();
-          let done = false;
-          const doneOnce = ok => { if (done) return; done = true; cleanup(); resolve(ok); };
-          const timer = setTimeout(() => doneOnce(false), timeoutMs);
-          function cleanup(){ img.onload = img.onerror = null; clearTimeout(timer); }
-          img.onload = () => doneOnce(true);
-          img.onerror = () => doneOnce(false);
+          let done=false;
+          const finish = ok => { if(done) return; done=true; cleanup(); resolve(ok); };
+          const timer = setTimeout(()=>finish(false), timeoutMs);
+          function cleanup(){ clearTimeout(timer); img.onload=null; img.onerror=null; }
+          img.onload = () => finish(true);
+          img.onerror = () => finish(false);
           img.src = url + (url.includes('?') ? '&' : '?') + 'ts=' + Date.now();
         });
       }
 
-      async function probeOnce(){
-        // roda as duas em paralelo; se qualquer uma der OK, mostramos
-        const [a, b] = await Promise.allSettled([
-          fetchProbe(ORIGIN_PING),
-          imgProbe(ORIGIN_PING)
-        ]);
-        const ok = (a.status === 'fulfilled' && a.value) || (b.status === 'fulfilled' && b.value);
-        if (ok) showBack();
+      async function checkConnectivity(){
+        // Estratégia: qualquer probe positivo já é suficiente
+        if (isOnlineHint()) return true;
+        const [a, b] = await Promise.allSettled([ fetchProbe(ORIGIN_PING), imgProbe(ORIGIN_PING) ]);
+        const ok = (a.status==='fulfilled' && a.value===true) || (b.status==='fulfilled' && b.value===true);
+        return ok;
       }
 
-      // Loop de verificação
-      const pollId = setInterval(() => {
-        // também tenta por navigator.onLine, mas não depende dele
-        if (navigator.onLine) { showBack(); }
-        probeOnce();
-      }, POLL_MS);
+      async function onRetryClick(){
+        // Protege contra múltiplos cliques
+        btn.disabled = true;
+        btn.classList.remove('shake');
+        btn.textContent = '⏳ Verificando...';
+        speak('Verificando conexão');
 
-      // Se a aba voltar ao foco, tenta de novo imediatamente
-      window.addEventListener('focus', () => { probeOnce(); }, { passive: true });
+        const ok = await checkConnectivity();
 
-      // Limpa o intervalo se já mostramos o botão
-      const stopIfShown = () => { if (shown) clearInterval(pollId); };
-      backBtn.addEventListener('click', stopIfShown);
-      window.addEventListener('online', stopIfShown);
+        if (ok){
+          btn.textContent = '✅ Conectado! Voltando...';
+          speak('Conexão detectada, retornando');
+          // pequeno delay para feedback visual
+          setTimeout(()=>{ try{ history.back(); }catch(e){} }, 150);
+        }else{
+          // continua na mesma página
+          btn.disabled = false;
+          btn.textContent = '🔄 Reconectar';
+          btn.classList.add('shake');
+          setTimeout(()=>btn.classList.remove('shake'), 350);
+          speak('Sem conexão, tente novamente');
+          try{ if(navigator.vibrate) navigator.vibrate(80); }catch(e){}
+        }
+      }
+
+      btn.addEventListener('click', onRetryClick);
+
+      // Também permite tentar com Enter/Espaço quando focado
+      btn.addEventListener('keydown', (e)=>{
+        if (e.key === 'Enter' || e.key === ' '){
+          e.preventDefault();
+          onRetryClick();
+        }
+      });
     })();
   </script>
 </body>
