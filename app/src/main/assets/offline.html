@@ -1,50 +1,22 @@
+
 <!doctype html>
 <html lang="pt-br">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Reconectando…</title>
-
-<!-- Anti-cache desta página -->
-<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0">
-<meta http-equiv="Pragma" content="no-cache">
-<meta http-equiv="Expires" content="0">
-
-<!-- CSP rígida: nada externo, navegação só para a MESMA origem -->
-<meta http-equiv="Content-Security-Policy"
-      content="default-src 'none'; 
-               img-src 'self' data:;
-               style-src 'unsafe-inline';
-               script-src 'unsafe-inline';
-               connect-src 'self';
-               navigate-to 'self';
-               frame-ancestors 'none';
-               object-src 'none';
-               base-uri 'none';
-               form-action 'none'">
-
 <style>
-  :root{color-scheme:light only}
-  html,body{height:100%}
-  body{font-family:system-ui,Arial,sans-serif;margin:0;display:grid;place-items:center;min-height:100vh;background:#f7f7f7}
-  .card{max-width:460px;margin:24px;padding:24px;text-align:center;border-radius:16px;box-shadow:0 8px 30px rgba(0,0,0,.08);background:#fff}
+  body{font-family:system-ui,Arial,sans-serif;margin:0;display:grid;place-items:center;height:100vh}
+  .card{max-width:420px;padding:24px;text-align:center;border-radius:16px;box-shadow:0 8px 30px rgba(0,0,0,.08)}
   h1{font-size:18px;margin:0 0 8px}
   p{color:#555;margin:0 0 16px}
-  button{padding:10px 14px;border:0;border-radius:12px;cursor:pointer;background:#0a7cff;color:#fff}
-  small{display:block;margin-top:10px;color:#777;min-height:1.2em}
+  button{padding:10px 16px;border:0;border-radius:12px;cursor:pointer}
 </style>
-
-<div class="card" role="status" aria-live="polite">
+<div class="card">
   <h1>Sem conexão</h1>
   <p>Estamos tentando reconectar…</p>
-  <button id="tryBtn" type="button">Tentar agora</button>
-  <small>Aguardando rede…</small>
+  <button onclick="location.reload()">Tentar agora</button>
 </div>
-
 <script>
-  // Modo inerte total: sem timers, sem eventos automáticos, sem limpar cache/SW.
-  // O botão apenas recarrega a MESMA URL, sem expor caminhos.
-  document.getElementById('tryBtn')?.addEventListener('click', function () {
-    location.reload();
-  });
+  // Poll simples para quando a rede voltar
+  setInterval(()=>navigator.onLine && location.reload(), 4000);
 </script>
-</html>
