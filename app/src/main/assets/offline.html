@@ -59,66 +59,41 @@
       filter: drop-shadow(0 6px 16px rgba(0,0,0,.25));
     }
     .pulse { animation: pulse 2.4s ease-in-out infinite; transform-origin: 50% 50%; }
-    @keyframes pulse {
-      0% { transform: scale(1); opacity: 1;}
-      50%{ transform: scale(1.04); opacity: .96;}
-      100%{ transform: scale(1); opacity: 1;}
-    }
+    @keyframes pulse { 0%{transform:scale(1);opacity:1}50%{transform:scale(1.04);opacity:.96}100%{transform:scale(1);opacity:1} }
     .wave { animation: wave 2.4s ease-in-out infinite; }
-    @keyframes wave {
-      0% { opacity:.35; transform: translateY(0);}
-      50%{ opacity:.12; transform: translateY(4px);}
-      100%{ opacity:.35; transform: translateY(0);}
-    }
+    @keyframes wave { 0%{opacity:.35;transform:translateY(0)}50%{opacity:.12;transform:translateY(4px)}100%{opacity:.35;transform:translateY(0)} }
 
-    h1 {
-      font-size: clamp(20px, 3.8vw, 28px);
-      margin: 0 0 6px;
-      letter-spacing: .2px;
-    }
-    p {
-      margin: 8px 0 0;
-      color: var(--muted);
-    }
+    h1 { font-size: clamp(20px, 3.8vw, 28px); margin: 0 0 6px; letter-spacing: .2px; }
+    p { margin: 8px 0 0; color: var(--muted); }
 
-    .status-line{
-      margin-top: 16px;
-      font-weight: 700;
-      display:flex; gap:8px; justify-content:center; align-items:baseline; flex-wrap:wrap;
-    }
-    .dots { letter-spacing:.15em; opacity:.85 }
-    .nums {
-      font-variant-numeric: tabular-nums;
-      display:inline-flex; gap:6px; align-items:center;
-    }
-    .num {
-      display:inline-block; min-width: 1.2ch;
-      font-size: 28px; line-height:1;
-      padding: 6px 10px; border-radius: 10px;
+    .status-line{ margin-top:16px; font-weight:700; display:flex; gap:8px; justify-content:center; align-items:baseline; flex-wrap:wrap; }
+    .dots{ letter-spacing:.15em; opacity:.85 }
+    .nums{ font-variant-numeric: tabular-nums; display:inline-flex; gap:6px; align-items:center; }
+    .num{
+      display:inline-block; min-width:1.2ch; font-size:28px; line-height:1;
+      padding:6px 10px; border-radius:10px;
       background: linear-gradient(180deg, rgba(14,165,233,.14), rgba(14,165,233,.06));
-      border: 1px solid rgba(14,165,233,.25);
-      color: var(--accent);
+      border: 1px solid rgba(14,165,233,.25); color: var(--accent);
       box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
     }
 
     .foot { margin-top: 18px; font-size: 13px; color: var(--muted); opacity: .9; }
 
     .actions { margin-top: 18px; display:flex; justify-content:center; }
-    .btn {
+    .btn{
       display:inline-flex; align-items:center; justify-content:center; gap:.5rem;
       font-weight:800; padding:12px 16px; border-radius:12px; border:none; cursor:pointer;
       background: var(--btn-bg); color: var(--btn-fg); box-shadow: var(--shadow);
       transition: transform .08s ease, opacity .2s ease, background .2s ease;
     }
-    .btn:active { transform: translateY(1px); }
+    .btn:active{ transform: translateY(1px); }
     .btn[disabled]{ opacity:.5; pointer-events:none; }
-    .btn-ok { background: var(--btn-bg-ok); }
-    .hide { display:none !important; }
+    .btn-ok{ background: var(--btn-bg-ok); }
+    .hide{ display:none !important; }
   </style>
 </head>
 <body>
   <main class="card" role="main" aria-live="polite">
-    <!-- Ilustração SVG leve (plug desconectado) -->
     <div class="art" aria-hidden="true">
       <svg viewBox="0 0 160 160" width="140" height="140">
         <circle class="wave" cx="80" cy="80" r="70" fill="none" stroke="url(#g1)" stroke-width="2"/>
@@ -141,20 +116,15 @@
     <h1>Sem conexão</h1>
     <p>Fique tranquilo — estamos tentando reconectar.</p>
 
-    <!-- Linha de status: "Tentando conexão... 5.4.3.2.1" -->
     <div class="status-line" id="statusLine" aria-live="polite" aria-atomic="true">
       <span class="dots">Tentando conexão…</span>
       <span class="nums" id="nums">
-        <span class="num">5</span>
-        <span class="num">4</span>
-        <span class="num">3</span>
-        <span class="num">2</span>
-        <span class="num">1</span>
+        <span class="num">5</span><span class="num">4</span><span class="num">3</span><span class="num">2</span><span class="num">1</span>
       </span>
     </div>
 
     <div class="actions">
-      <button id="backBtn" class="btn btn-ok hide" type="button" aria-label="Voltar para a página anterior">✅ Internet Estabelecida</button>
+      <button id="backBtn" class="btn btn-ok hide" type="button" aria-label="Voltar para a página anterior">✅ Voltar para a página anterior</button>
     </div>
 
     <p class="foot" id="footHelp">O botão aparece assim que a internet voltar.</p>
@@ -164,64 +134,103 @@
     (function(){
       'use strict';
 
-      // ===== Animação do "5.4.3.2.1" em loop (meramente visual)
-      const nums = [5,4,3,2,1];
+      // ===== Animação do "5.4.3.2.1" (loop visual)
+      const seq = [5,4,3,2,1];
       const $nums = document.getElementById('nums');
-      let idx = 0;
+      let off = 0;
       setInterval(() => {
-        // Rotaciona a fila de números visualmente
-        idx = (idx + 1) % nums.length;
-        // Atualiza os cinco blocos para sempre mostrar "5.4.3.2.1"
-        // com um deslocamento para dar sensação de contagem
-        const order = nums.slice(idx).concat(nums.slice(0, idx));
-        // Render leve (evita recriar nós desnecessariamente)
-        const children = $nums.children;
-        for (let i = 0; i < children.length && i < order.length; i++) {
-          children[i].textContent = order[i];
-        }
+        off = (off + 1) % seq.length;
+        const ordered = seq.slice(off).concat(seq.slice(0, off));
+        const kids = $nums.children;
+        for (let i = 0; i < kids.length; i++) kids[i].textContent = ordered[i] || '';
       }, 1000);
 
-      // ===== Lógica de reconexão
       const backBtn = document.getElementById('backBtn');
       const footHelp = document.getElementById('footHelp');
-      let announced = false; // evita repetir UI
+      let shown = false;
 
-      function onBack(){
-        // Volta apenas quando o usuário tocar
-        try { history.back(); }
-        catch(e){ /* sem-op */ }
-      }
-      backBtn.addEventListener('click', onBack);
-      backBtn.addEventListener('keydown', e => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onBack(); }
-      });
-
-      function showBackButton(){
-        if (announced) return;
-        announced = true;
+      function showBack(){
+        if (shown) return;
+        shown = true;
         backBtn.classList.remove('hide');
-        backBtn.focus({ preventScroll:true });
+        try { backBtn.focus({ preventScroll: true }); } catch(e){}
         if (footHelp) footHelp.textContent = 'Conexão restabelecida. Toque para voltar.';
-        // opcional: leve vibração, se suportado
         try { if (navigator.vibrate) navigator.vibrate([120,60,120]); } catch(e){}
       }
 
-      // 1) Evento nativo de rede
-      window.addEventListener('online', showBackButton, { once:true });
+      function goBack(){
+        try { history.back(); } catch(e){}
+      }
+      backBtn.addEventListener('click', goBack);
+      backBtn.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); goBack(); }
+      });
 
-      // 2) *Poll* para cobrir WebViews que não disparam 'online'
+      // ===== 1) Evento nativo (pode não disparar em WebView)
+      window.addEventListener('online', showBack, { once: true });
+
+      // ===== 2) Pings ativos (funcionam mesmo com SW/WebView teimoso)
+      const ORIGIN_PING = '/'; // qualquer asset do seu domínio também serve
       const POLL_MS = 1200;
-      const pollId = setInterval(() => {
-        if (navigator.onLine) {
-          clearInterval(pollId);
-          showBackButton();
+
+      // Fetch HEAD (no-cors) — sucesso = não lança erro de rede
+      async function fetchProbe(url){
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 2500);
+        try {
+          await fetch(url, {
+            method: 'HEAD',
+            cache: 'no-store',
+            mode: 'no-cors',     // evita CORS bloquear
+            credentials: 'omit',
+            signal: ctrl.signal
+          });
+          clearTimeout(t);
+          return true; // se não explodiu, consideramos OK
+        } catch(e){
+          clearTimeout(t);
+          return false;
         }
+      }
+
+      // Ping por <img> (ignora CORS totalmente)
+      function imgProbe(url, timeoutMs = 3000){
+        return new Promise(resolve => {
+          const img = new Image();
+          let done = false;
+          const doneOnce = ok => { if (done) return; done = true; cleanup(); resolve(ok); };
+          const timer = setTimeout(() => doneOnce(false), timeoutMs);
+          function cleanup(){ img.onload = img.onerror = null; clearTimeout(timer); }
+          img.onload = () => doneOnce(true);
+          img.onerror = () => doneOnce(false);
+          img.src = url + (url.includes('?') ? '&' : '?') + 'ts=' + Date.now();
+        });
+      }
+
+      async function probeOnce(){
+        // roda as duas em paralelo; se qualquer uma der OK, mostramos
+        const [a, b] = await Promise.allSettled([
+          fetchProbe(ORIGIN_PING),
+          imgProbe(ORIGIN_PING)
+        ]);
+        const ok = (a.status === 'fulfilled' && a.value) || (b.status === 'fulfilled' && b.value);
+        if (ok) showBack();
+      }
+
+      // Loop de verificação
+      const pollId = setInterval(() => {
+        // também tenta por navigator.onLine, mas não depende dele
+        if (navigator.onLine) { showBack(); }
+        probeOnce();
       }, POLL_MS);
 
-      // 3) Se o app voltar ao foco com rede, também checa
-      window.addEventListener('focus', () => {
-        if (navigator.onLine) showBackButton();
-      }, { passive:true });
+      // Se a aba voltar ao foco, tenta de novo imediatamente
+      window.addEventListener('focus', () => { probeOnce(); }, { passive: true });
+
+      // Limpa o intervalo se já mostramos o botão
+      const stopIfShown = () => { if (shown) clearInterval(pollId); };
+      backBtn.addEventListener('click', stopIfShown);
+      window.addEventListener('online', stopIfShown);
     })();
   </script>
 </body>
