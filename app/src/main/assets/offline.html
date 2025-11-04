@@ -15,6 +15,9 @@
       --ring:#60a5fa33;
       --card:#0f172a;
       --shadow: 0 10px 30px rgba(0,0,0,.25);
+      --btn-bg:#0ea5e9;
+      --btn-fg:#ffffff;
+      --btn-bg-ok:#10b981;
     }
     @media (prefers-color-scheme: light){
       :root{
@@ -25,6 +28,9 @@
         --ring:#0284c71f;
         --card:#ffffff;
         --shadow: 0 10px 30px rgba(2,8,23,.08);
+        --btn-bg:#0284c7;
+        --btn-fg:#ffffff;
+        --btn-bg-ok:#059669;
       }
     }
 
@@ -34,7 +40,7 @@
       margin: 0;
       background: radial-gradient(1200px 800px at 50% -100px, var(--ring), transparent 60%), var(--bg);
       color: var(--fg);
-      font: 500 16px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+      font: 500 16px/1.4 system-ui,-apple-system, Segoe UI, Roboto, Ubuntu, Cantarell,"Helvetica Neue", Arial,"Noto Sans","Apple Color Emoji","Segoe UI Emoji";
       display: grid;
       place-items: center;
     }
@@ -52,7 +58,6 @@
       width: 140px; height: 140px; margin: 8px auto 18px; position: relative;
       filter: drop-shadow(0 6px 16px rgba(0,0,0,.25));
     }
-    /* Animações sutis */
     .pulse { animation: pulse 2.4s ease-in-out infinite; transform-origin: 50% 50%; }
     @keyframes pulse {
       0% { transform: scale(1); opacity: 1;}
@@ -76,31 +81,39 @@
       color: var(--muted);
     }
 
-    .counter {
-      display: inline-flex; gap: 6px; align-items: baseline;
+    .status-line{
       margin-top: 16px;
-      font-weight: 600;
+      font-weight: 700;
+      display:flex; gap:8px; justify-content:center; align-items:baseline; flex-wrap:wrap;
     }
-    .counter .num {
-      display:inline-block;
-      min-width: 1ch;
+    .dots { letter-spacing:.15em; opacity:.85 }
+    .nums {
       font-variant-numeric: tabular-nums;
-      font-size: 28px;
-      line-height: 1;
-      padding: 6px 10px;
-      border-radius: 10px;
+      display:inline-flex; gap:6px; align-items:center;
+    }
+    .num {
+      display:inline-block; min-width: 1.2ch;
+      font-size: 28px; line-height:1;
+      padding: 6px 10px; border-radius: 10px;
       background: linear-gradient(180deg, rgba(14,165,233,.14), rgba(14,165,233,.06));
       border: 1px solid rgba(14,165,233,.25);
       color: var(--accent);
       box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
     }
 
-    .foot {
-      margin-top: 22px;
-      font-size: 13px;
-      color: var(--muted);
-      opacity: .9;
+    .foot { margin-top: 18px; font-size: 13px; color: var(--muted); opacity: .9; }
+
+    .actions { margin-top: 18px; display:flex; justify-content:center; }
+    .btn {
+      display:inline-flex; align-items:center; justify-content:center; gap:.5rem;
+      font-weight:800; padding:12px 16px; border-radius:12px; border:none; cursor:pointer;
+      background: var(--btn-bg); color: var(--btn-fg); box-shadow: var(--shadow);
+      transition: transform .08s ease, opacity .2s ease, background .2s ease;
     }
+    .btn:active { transform: translateY(1px); }
+    .btn[disabled]{ opacity:.5; pointer-events:none; }
+    .btn-ok { background: var(--btn-bg-ok); }
+    .hide { display:none !important; }
   </style>
 </head>
 <body>
@@ -108,7 +121,6 @@
     <!-- Ilustração SVG leve (plug desconectado) -->
     <div class="art" aria-hidden="true">
       <svg viewBox="0 0 160 160" width="140" height="140">
-        <!-- halo -->
         <circle class="wave" cx="80" cy="80" r="70" fill="none" stroke="url(#g1)" stroke-width="2"/>
         <defs>
           <linearGradient id="g1" x1="0" x2="0" y1="0" y2="1">
@@ -116,14 +128,10 @@
             <stop offset="100%" stop-color="var(--accent)" stop-opacity=".05"/>
           </linearGradient>
         </defs>
-        <!-- base -->
         <rect x="44" y="60" rx="10" ry="10" width="72" height="48" fill="var(--bg)" stroke="var(--accent)" stroke-width="2.5"/>
-        <!-- pinos -->
         <rect x="54" y="50" width="10" height="16" rx="3" fill="var(--accent)" opacity=".9"/>
         <rect x="96" y="50" width="10" height="16" rx="3" fill="var(--accent)" opacity=".9"/>
-        <!-- cabo -->
         <path d="M116 84 C136 84, 144 96, 144 110 S132 136, 110 136" fill="none" stroke="var(--accent)" stroke-width="3" stroke-dasharray="6 6"/>
-        <!-- X (desconectado) -->
         <g class="pulse" transform="translate(64,82)">
           <path d="M0 0 L32 32 M32 0 L0 32" stroke="var(--accent)" stroke-width="3" stroke-linecap="round"/>
         </g>
@@ -131,61 +139,89 @@
     </div>
 
     <h1>Sem conexão</h1>
-    <p>Assim que a internet voltar, retornaremos automaticamente.</p>
+    <p>Fique tranquilo — estamos tentando reconectar.</p>
 
-    <div class="counter" aria-label="Tentando conexão novamente">
-      <span>Tentando conexão novamente em</span>
-      <span class="num" id="count">3</span>
-      <span>…</span>
+    <!-- Linha de status: "Tentando conexão... 5.4.3.2.1" -->
+    <div class="status-line" id="statusLine" aria-live="polite" aria-atomic="true">
+      <span class="dots">Tentando conexão…</span>
+      <span class="nums" id="nums">
+        <span class="num">5</span>
+        <span class="num">4</span>
+        <span class="num">3</span>
+        <span class="num">2</span>
+        <span class="num">1</span>
+      </span>
     </div>
 
-    <p class="foot">Não é preciso tocar em nada.</p>
+    <div class="actions">
+      <button id="backBtn" class="btn btn-ok hide" type="button" aria-label="Voltar para a página anterior">✅ Internet Estabelecida</button>
+    </div>
+
+    <p class="foot" id="footHelp">O botão aparece assim que a internet voltar.</p>
   </main>
 
   <script>
     (function(){
       'use strict';
 
-      // Evita múltiplas saídas
-      let leftOnce = false;
-      const leave = () => {
-        if (leftOnce) return;
-        leftOnce = true;
-        // pequeno atraso para renderizar a transição visual
-        setTimeout(() => {
-          // Opção A: voltar no histórico. Sem fallback para não mudar seu fluxo.
-          history.back();
-        }, 120);
-      };
+      // ===== Animação do "5.4.3.2.1" em loop (meramente visual)
+      const nums = [5,4,3,2,1];
+      const $nums = document.getElementById('nums');
+      let idx = 0;
+      setInterval(() => {
+        // Rotaciona a fila de números visualmente
+        idx = (idx + 1) % nums.length;
+        // Atualiza os cinco blocos para sempre mostrar "5.4.3.2.1"
+        // com um deslocamento para dar sensação de contagem
+        const order = nums.slice(idx).concat(nums.slice(0, idx));
+        // Render leve (evita recriar nós desnecessariamente)
+        const children = $nums.children;
+        for (let i = 0; i < children.length && i < order.length; i++) {
+          children[i].textContent = order[i];
+        }
+      }, 1000);
 
-      // 1) Listener de conectividade do navegador
-      window.addEventListener('online', leave, { once: true });
+      // ===== Lógica de reconexão
+      const backBtn = document.getElementById('backBtn');
+      const footHelp = document.getElementById('footHelp');
+      let announced = false; // evita repetir UI
 
-      // 2) Heartbeat leve: confere navigator.onLine periodicamente
-      //    (boas WebViews disparam 'online', mas isso cobre casos teimosos)
-      const POLL_MS = 1500;
-      const poll = () => {
-        if (navigator.onLine) leave();
-      };
-      const pollId = setInterval(poll, POLL_MS);
-
-      // Limpa o intervalo se já saímos
-      document.addEventListener('visibilitychange', () => {
-        if (leftOnce) clearInterval(pollId);
+      function onBack(){
+        // Volta apenas quando o usuário tocar
+        try { history.back(); }
+        catch(e){ /* sem-op */ }
+      }
+      backBtn.addEventListener('click', onBack);
+      backBtn.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onBack(); }
       });
 
-      // Contador 3 → 2 → 1 (loop visual)
-      const $count = document.getElementById('count');
-      let n = 3;
-      const tick = () => {
-        $count.textContent = String(n);
-        n = (n <= 1) ? 3 : (n - 1);
-      };
-      tick();
-      setInterval(tick, 1000);
+      function showBackButton(){
+        if (announced) return;
+        announced = true;
+        backBtn.classList.remove('hide');
+        backBtn.focus({ preventScroll:true });
+        if (footHelp) footHelp.textContent = 'Conexão restabelecida. Toque para voltar.';
+        // opcional: leve vibração, se suportado
+        try { if (navigator.vibrate) navigator.vibrate([120,60,120]); } catch(e){}
+      }
 
-      // Se o app voltar do background com rede, também sai
-      window.addEventListener('focus', poll, { passive: true });
+      // 1) Evento nativo de rede
+      window.addEventListener('online', showBackButton, { once:true });
+
+      // 2) *Poll* para cobrir WebViews que não disparam 'online'
+      const POLL_MS = 1200;
+      const pollId = setInterval(() => {
+        if (navigator.onLine) {
+          clearInterval(pollId);
+          showBackButton();
+        }
+      }, POLL_MS);
+
+      // 3) Se o app voltar ao foco com rede, também checa
+      window.addEventListener('focus', () => {
+        if (navigator.onLine) showBackButton();
+      }, { passive:true });
     })();
   </script>
 </body>
