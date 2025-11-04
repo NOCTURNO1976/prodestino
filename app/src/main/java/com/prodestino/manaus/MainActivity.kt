@@ -25,6 +25,9 @@ import android.view.WindowManager
 import android.webkit.CookieManager
 import android.webkit.GeolocationPermissions
 import android.webkit.RenderProcessGoneDetail
+import android.webkit.ServiceWorkerClient
+import android.webkit.ServiceWorkerController
+import android.webkit.ServiceWorkerWebSettings
 import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -36,6 +39,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.prodestino.manaus.location.ForegroundLocationService
+import java.io.ByteArrayInputStream
 
 class MainActivity : AppCompatActivity() {
 
@@ -203,6 +207,11 @@ class MainActivity : AppCompatActivity() {
         if (this::webView.isInitialized && webView.url != null) return
 
         webView = WebView(this)
+
+        // *** Blindagem 1: desabilita aceleração de hardware só da WebView ***
+        // (equivalente a hardwareAccelerated=false só para ela)
+        webView.setLayerType(View.LAYER_TYPE_SOFTWARE, null)
+
         setContentView(webView)
 
         val s = webView.settings
@@ -216,6 +225,26 @@ class MainActivity : AppCompatActivity() {
 
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
+
+        // *** Blindagem 2: bloquear Service Worker no WebView ***
+        try {
+            if (Build.VERSION.SDK_INT >= 24) {
+                val swc = ServiceWorkerController.getInstance()
+                val sws: ServiceWorkerWebSettings = swc.serviceWorkerWebSettings
+                sws.setAllowContentAccess(false)
+                sws.setAllowFileAccess(false)
+                sws.setBlockNetworkLoads(true) // efetivamente impede SW
+                swc.setServiceWorkerClient(object : ServiceWorkerClient() {
+                    override fun shouldInterceptRequest(request: WebResourceRequest): WebResourceResponse? {
+                        // Bloqueia todo fetch feito pelo SW
+                        return WebResourceResponse(
+                            "text/plain", "utf-8",
+                            ByteArrayInputStream(ByteArray(0))
+                        )
+                    }
+                })
+            }
+        } catch (_: Throwable) { }
 
         val base = normalizedBase()
 
@@ -295,8 +324,6 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageFinished(view: WebView, url: String) {
                 super.onPageFinished(view, url)
-
-                // Só marca como "página boa" se for do domínio base
                 val isGood = url.startsWith(base)
                 if (isGood) {
                     pageReady = true
@@ -324,7 +351,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showOfflineInline() {
-        // helper externo para outros pontos (erros fora do client)
         val base = normalizedBase()
         if (!this::webView.isInitialized) return
         if (isOfflineShown) return
@@ -335,7 +361,7 @@ class MainActivity : AppCompatActivity() {
     private fun recoverFromOfflineOnce() {
         if (!isOffline()) return
         val now = SystemClock.elapsedRealtime()
-        if (now - lastRecoverAt < 3000L) return
+        if (now - lastRecoverAt < 6000L) return // **debounce 6s** (mais conservador)
         lastRecoverAt = now
 
         val target = (lastGoodUrl ?: normalizedBase())
@@ -359,6 +385,7 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Exception) {}
 
         webView = WebView(this)
+        webView.setLayerType(View.LAYER_TYPE_SOFTWARE, null) // mantém HW off
         setContentView(webView)
 
         val s = webView.settings
@@ -373,7 +400,22 @@ class MainActivity : AppCompatActivity() {
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
 
-        // Reaplica clients
+        // Reaplica bloqueio do Service Worker
+        try {
+            if (Build.VERSION.SDK_INT >= 24) {
+                val swc = ServiceWorkerController.getInstance()
+                val sws: ServiceWorkerWebSettings = swc.serviceWorkerWebSettings
+                sws.setAllowContentAccess(false)
+                sws.setAllowFileAccess(false)
+                sws.setBlockNetworkLoads(true)
+                swc.setServiceWorkerClient(object : ServiceWorkerClient() {
+                    override fun shouldInterceptRequest(request: WebResourceRequest): WebResourceResponse? {
+                        return WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
+                    }
+                })
+            }
+        } catch (_: Throwable) { }
+
         initWebViewClientsForRecreatedInstance()
 
         val base = normalizedBase()
@@ -385,7 +427,6 @@ class MainActivity : AppCompatActivity() {
         val base = normalizedBase()
 
         webView.webViewClient = object : WebViewClient() {
-
             private fun showOfflineInlineLocal() {
                 if (isOfflineShown) return
                 isOfflineShown = true
@@ -395,7 +436,6 @@ class MainActivity : AppCompatActivity() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val uri = request.url
                 val scheme = uri.scheme?.lowercase() ?: return false
-
                 if (scheme in listOf("intent", "whatsapp", "tel", "mailto", "market")) {
                     try {
                         val intent = Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME)
@@ -406,7 +446,6 @@ class MainActivity : AppCompatActivity() {
                     } catch (_: Throwable) {}
                     return true
                 }
-
                 if (scheme == "http" || scheme == "https") {
                     val host = uri.host ?: return false
                     if (host.endsWith(".")) {
@@ -422,28 +461,19 @@ class MainActivity : AppCompatActivity() {
                     }
                     return false
                 }
-
                 return false
             }
 
             override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
-                if (request.isForMainFrame && errorResponse.statusCode >= 400) {
-                    vibrate()
-                    showOfflineInlineLocal()
-                }
+                if (request.isForMainFrame && errorResponse.statusCode >= 400) { vibrate(); showOfflineInlineLocal() }
             }
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: android.webkit.WebResourceError) {
-                if (request.isForMainFrame) {
-                    vibrate()
-                    showOfflineInlineLocal()
-                }
+                if (request.isForMainFrame) { vibrate(); showOfflineInlineLocal() }
             }
 
             override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
-                vibrate()
-                handler.cancel()
-                showOfflineInlineLocal()
+                vibrate(); handler.cancel(); showOfflineInlineLocal()
             }
 
             override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
@@ -496,22 +526,15 @@ class MainActivity : AppCompatActivity() {
             val cm = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
             netCb = object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
-                    if (this@MainActivity::webView.isInitialized) {
-                        webView.setNetworkAvailable(true)
-                    }
                     if (isOffline()) {
                         vibrate(30)
-                        recoverFromOfflineOnce()
-                    }
-                }
-                override fun onLost(network: Network) {
-                    if (this@MainActivity::webView.isInitialized) {
-                        webView.setNetworkAvailable(false)
+                        // Espera 500ms para estabilizar a rede antes de sair do offline
+                        ui.postDelayed({ recoverFromOfflineOnce() }, 500L)
                     }
                 }
             }
             cm.registerDefaultNetworkCallback(netCb!!)
-        } catch (_: Exception) { /* OEMs que personalizam CM */ }
+        } catch (_: Exception) { /* alguns OEMs personalizam CM */ }
     }
 
     override fun onResume() {
