@@ -2,84 +2,154 @@
 <html lang="pt-br">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Reconectando...</title>
-<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate,
-max-age=0">
+<title>Reconectando…</title>
+<!-- Cabeçalhos contra cache desta página -->
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <style>
-:root{color-scheme:light only}
-body{font-family:system-ui,Arial,sans-serif;margin:0;display:grid;place-items:center;min-heig
-ht:100vh;background:#f7f7f7}
-.card{max-width:460px;margin:24px;padding:24px;text-align:center;border-radius:16px;box-s
-hadow:0 8px 30px rgba(0,0,0,.08);background:#fff}
-h1{font-size:18px;margin:0 0 8px}
-p{color:#555;margin:0 0 16px}
-button{padding:10px
-14px;border:0;border-radius:12px;cursor:pointer;background:#0a7cff;color:#fff}
-button[disabled]{opacity:.6;cursor:not-allowed}
-small{display:block;margin-top:10px;color:#777;min-height:1.2em}
+  :root{color-scheme:light only}
+  body{font-family:system-ui,Arial,sans-serif;margin:0;display:grid;place-items:center;min-height:100vh;background:#f7f7f7}
+  .card{max-width:460px;margin:24px;padding:24px;text-align:center;border-radius:16px;box-shadow:0 8px 30px rgba(0,0,0,.08);background:#fff}
+  h1{font-size:18px;margin:0 0 8px}
+  p{color:#555;margin:0 0 16px}
+  button{padding:10px 14px;border:0;border-radius:12px;cursor:pointer;background:#0a7cff;color:#fff}
+  small{display:block;margin-top:10px;color:#777;min-height:1.2em}
 </style>
+
 <div class="card" role="status" aria-live="polite">
-<h1>Sem conexão</h1>
-<p>Estamos tentando reconectar...</p>
-<button id="tryBtn" type="button">Tentar agora</button>
-<small id="status">Aguardando rede...</small>
+  <h1>Sem conexão</h1>
+  <p>Estamos tentando reconectar…</p>
+  <button id="tryBtn" type="button">Tentar agora</button>
+  <small id="status">Aguardando rede…</small>
 </div>
+
 <script>
 (() => {
-const TRY_TIMEOUT_MS = 4000; // tempo máx. por tentativa de fetch
-const COOLDOWN_MS = 3000; // trava anti-toque repetido
-const $status = document.getElementById('status');
-const $try = document.getElementById('tryBtn');
-const setStatus = (t) => { if ($status) $status.textContent = t || ''; };
-const withTimeout = (p, ms) => Promise.race([
-p, new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')), ms))
-]);
-// Teste real de conectividade (sem expor endpoints na interface)
-async function probeConnectivity() {
+  // ===== Configurações internas (sem expor URLs) =====
+  const TRY_TIMEOUT_MS = 4000;           // tempo máx. por tentativa de fetch
+  const QUIET_RETRY_DELAY_MS = 7000;     // fallback de nova tentativa (quando a aba está visível)
+  const MIN_RELOAD_GUARD_MS = 8000;      // evita recarregar em sequência
 
-const candidates = ['.', 'favicon.ico'];
-for (const path of candidates) {
-try {
-const res = await withTimeout(fetch(path, {
-method: 'GET',
-cache: 'no-store',
-credentials: 'include',
-headers: {'Cache-Control':'no-store','Pragma':'no-cache'}
-}), TRY_TIMEOUT_MS);
-if (res && res.ok) return true;
-} catch(_) { /* tenta próximo */ }
-}
-return false;
-}
-let cooling = false;
-async function onTry() {
-if (cooling) return;
-cooling = true;
-$try.disabled = true;
-setStatus('Verificando conexão...');
-try {
-const ok = await probeConnectivity();
-if (ok) {
-setStatus('Conexão restabelecida. Atualizando...');
-// Recarrega a MESMA URL, sem expor rota
-location.reload();
-return;
-}
-setStatus('Ainda sem resposta do servidor. Tente novamente em alguns segundos.');
-} finally {
-setTimeout(() => {
-cooling = false;
-$try.disabled = false;
-}, COOLDOWN_MS);
-}
-}
-// Nenhum evento automático que provoque reload.
-// Nada de online/visibilitychange/setInterval — só no botão.
-$try?.addEventListener('click', onTry);
-// Mensagem inicial
-setStatus('Aguardando rede...');
+  const $status = document.getElementById('status');
+  const $try    = document.getElementById('tryBtn');
+
+  // Chave usada para evitar loops de reload
+  const GUARD_KEY = '__offline_reload_ts';
+
+  const setStatus = (t) => { if ($status) $status.textContent = t || ''; };
+
+  // Timeout helper
+  const withTimeout = (p, ms) => Promise.race([
+    p,
+    new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')), ms))
+  ]);
+
+  // Atualiza SW (se existir) e limpa caches — silencioso
+  async function refreshSWAndCachesSilently() {
+    try {
+      if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map(r => r.update().catch(()=>{})));
+      }
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k => caches.delete(k).catch(()=>{})));
+      }
+    } catch(_) { /* silencioso */ }
+  }
+
+  // Teste real de conectividade SEM expor rotas:
+  //  - '.' (a própria página) com cache desativado
+  //  - 'favicon.ico' (leve), também sem cache
+  // Qualquer 200 já é suficiente.
+  async function probeConnectivity() {
+    // Mesmo que navigator.onLine seja falso/verdadeiro, validamos por fetch real
+    const candidates = ['.', 'favicon.ico'];
+    for (const path of candidates) {
+      try {
+        const res = await withTimeout(fetch(path, {
+          method: 'GET',
+          cache: 'no-store',
+          credentials: 'include',
+          headers: {'Cache-Control':'no-store','Pragma':'no-cache'}
+        }), TRY_TIMEOUT_MS);
+        if (res && res.ok) return true;
+      } catch(_) {
+        // tenta o próximo
+      }
+    }
+    return false;
+  }
+
+  function canReloadNow() {
+    const last = Number(sessionStorage.getItem(GUARD_KEY) || '0');
+    return Date.now() - last >= MIN_RELOAD_GUARD_MS;
+  }
+
+  function markReload() {
+    sessionStorage.setItem(GUARD_KEY, String(Date.now()));
+  }
+
+  async function safeReloadSamePage() {
+    // Marca para evitar loops
+    markReload();
+    // Tenta minimizar “prisão” da versão offline antes do reload
+    await refreshSWAndCachesSilently();
+    // Recarrega a MESMA URL (sem expor caminho algum)
+    location.reload();
+  }
+
+  // Fluxo principal de tentativa
+  let trying = false;
+  async function tryReconnect() {
+    if (trying) return;
+    trying = true;
+    try {
+      setStatus('Verificando conexão…');
+      const ok = await probeConnectivity();
+      if (ok && canReloadNow()) {
+        setStatus('Conexão restabelecida.');
+        await safeReloadSamePage();
+        return;
+      }
+      // Falhou ou guard bloqueou — mantemos a tela, sem navegar
+      setStatus('Sem resposta do servidor. Tente novamente em instantes.');
+    } finally {
+      trying = false;
+    }
+  }
+
+  // Botão único
+  $try?.addEventListener('click', tryReconnect);
+
+  // Eventos do navegador (sem agressividade)
+  window.addEventListener('online', () => {
+    // Quando o SO sinaliza "online", tentamos, mas respeitando guard
+    if (document.visibilityState === 'visible') tryReconnect();
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      // Ao voltar para a tela, faz uma tentativa suave
+      setTimeout(() => tryReconnect(), 300);
+    }
+  });
+
+  // Fallback de tentativa esporádica (sem loops rápidos)
+  let retryTimer = null;
+  function scheduleQuietRetry() {
+    clearTimeout(retryTimer);
+    if (document.visibilityState === 'visible') {
+      retryTimer = setTimeout(() => tryReconnect(), QUIET_RETRY_DELAY_MS);
+    }
+  }
+  document.addEventListener('visibilitychange', scheduleQuietRetry);
+  window.addEventListener('online', scheduleQuietRetry);
+
+  // Primeira tentativa ao abrir
+  tryReconnect();
+  scheduleQuietRetry();
 })();
 </script>
 </html>
