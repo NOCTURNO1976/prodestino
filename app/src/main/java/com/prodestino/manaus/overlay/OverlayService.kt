@@ -1,6 +1,8 @@
 package com.prodestino.manaus.overlay
 
-import android.app.*
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
@@ -31,9 +33,9 @@ class OverlayService : Service() {
         startForeground(
             NOTIF_ID,
             NotificationCompat.Builder(this, CHANNEL_ID)
-                .setSmallIcon(R.drawable.ic_stat_name)
+                .setSmallIcon(R.mipmap.ic_launcher) // usa o ícone do app
                 .setContentTitle("Atalho flutuante ativo")
-                .setContentText("Toque no botão para voltar ao Pro Destino")
+                .setContentText("Toque para voltar ao Pro Destino")
                 .setOngoing(true)
                 .build()
         )
@@ -44,7 +46,6 @@ class OverlayService : Service() {
         when (intent?.action) {
             ACTION_SHOW -> showBubble()
             ACTION_HIDE -> hideBubble()
-            else -> { /* noop */ }
         }
         return START_STICKY
     }
@@ -57,11 +58,10 @@ class OverlayService : Service() {
         val inflater = getSystemService(Context.LAYOUT_INFLATER_SERVICE) as LayoutInflater
         bubbleView = inflater.inflate(R.layout.overlay_bubble, null)
 
-        // Parâmetros da janela (overlay)
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         else
-            WindowManager.LayoutParams.TYPE_PHONE
+            @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
 
         params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -77,26 +77,24 @@ class OverlayService : Service() {
             y = 200
         }
 
-        val iv = bubbleView!!.findViewById<ImageView>(R.id.bubbleIcon)
-
         // Arrastar
         bubbleView!!.setOnTouchListener(object : View.OnTouchListener {
             private var initialX = 0
             private var initialY = 0
-            private var initialTouchX = 0f
-            private var initialTouchY = 0f
-            override fun onTouch(v: View, event: MotionEvent): Boolean {
-                when (event.action) {
+            private var downX = 0f
+            private var downY = 0f
+            override fun onTouch(v: View, e: MotionEvent): Boolean {
+                when (e.action) {
                     MotionEvent.ACTION_DOWN -> {
                         initialX = params!!.x
                         initialY = params!!.y
-                        initialTouchX = event.rawX
-                        initialTouchY = event.rawY
+                        downX = e.rawX
+                        downY = e.rawY
                         return true
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        params!!.x = initialX - (event.rawX - initialTouchX).toInt()
-                        params!!.y = initialY + (event.rawY - initialTouchY).toInt()
+                        params!!.x = initialX - (e.rawX - downX).toInt()
+                        params!!.y = initialY + (e.rawY - downY).toInt()
                         windowManager?.updateViewLayout(bubbleView, params)
                         return true
                     }
@@ -105,12 +103,15 @@ class OverlayService : Service() {
             }
         })
 
-        // Clique → trazer app pra frente e ocultar a bolha
+        // Clique → trazer app pra frente e esconder a bolha
+        val iv = bubbleView!!.findViewById<ImageView>(R.id.bubbleIcon)
         iv.setOnClickListener {
             val i = Intent(this, MainActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or
-                         Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                         Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                            Intent.FLAG_ACTIVITY_CLEAR_TOP
+                )
             }
             startActivity(i)
             hideBubble()
@@ -120,8 +121,8 @@ class OverlayService : Service() {
     }
 
     private fun hideBubble() {
-        bubbleView?.let {
-            windowManager?.removeView(it)
+        bubbleView?.let { v ->
+            try { windowManager?.removeView(v) } catch (_: Exception) {}
         }
         bubbleView = null
     }
