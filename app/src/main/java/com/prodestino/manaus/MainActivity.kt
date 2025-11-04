@@ -30,6 +30,7 @@ import android.webkit.ServiceWorkerClient
 import android.webkit.ServiceWorkerController
 import android.webkit.ServiceWorkerWebSettings
 import android.webkit.SslErrorHandler
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -63,11 +64,32 @@ class MainActivity : AppCompatActivity() {
         get() = getSharedPreferences("app_prefs", MODE_PRIVATE).getString("last_good_url", null)
         set(v) { getSharedPreferences("app_prefs", MODE_PRIVATE).edit().putString("last_good_url", v).apply() }
 
-    // Pedido pendente de permissões de câmera/microfone vindas do WebView (getUserMedia)
+    // Pedido pendente de getUserMedia vindo do WebView
     private var pendingWebPermission: PermissionRequest? = null
 
+    // File chooser callback
+    private var filePathCallback: ValueCallback<Array<Uri>>? = null
+    private val fileChooserLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val callback = filePathCallback
+        filePathCallback = null
+        if (callback == null) return@registerForActivityResult
+        if (result.resultCode == RESULT_OK) {
+            val data = result.data
+            val uri: Uri? = data?.data
+            if (uri != null) {
+                callback.onReceiveValue(arrayOf(uri))
+            } else {
+                callback.onReceiveValue(null)
+            }
+        } else {
+            callback.onReceiveValue(null)
+        }
+    }
+
     // =======================
-    // HTML offline inline (sem JS) — mantém a MESMA ORIGEM via baseURL
+    // HTML offline inline
     // =======================
     private val OFFLINE_HTML: String by lazy {
         """
@@ -80,8 +102,7 @@ class MainActivity : AppCompatActivity() {
         <meta http-equiv="Pragma" content="no-cache">
         <meta http-equiv="Expires" content="0">
         <meta http-equiv="Content-Security-Policy"
-              content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:;
-                       navigate-to 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'">
+              content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; navigate-to 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'">
         <style>
           html,body{height:100%}
           body{font-family:system-ui,Arial,sans-serif;margin:0;display:grid;place-items:center;background:#f7f7f7}
@@ -117,7 +138,7 @@ class MainActivity : AppCompatActivity() {
                     v.vibrate(ms)
                 }
             }
-        } catch (_: Exception) { /* silencioso */ }
+        } catch (_: Exception) { }
     }
 
     private fun hasFineOrCoarse(): Boolean {
@@ -142,36 +163,26 @@ class MainActivity : AppCompatActivity() {
     private val reqForegroundPerms = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) {
-        // Após localização, seguir fluxo normal
         maybeStartService()
         proceedIfReady()
     }
 
     private val reqNotifPerm = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) {
-        proceedIfReady()
-    }
+    ) { proceedIfReady() }
 
     private val reqCamMicPerms = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
-        // Se foram concedidas, e existe um pedido do WebView pendente, concede ao WebView
         val grantedCamera = results[Manifest.permission.CAMERA] == true
         val grantedMic = results[Manifest.permission.RECORD_AUDIO] == true
 
         pendingWebPermission?.let { req ->
             val needsVideo = req.resources.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE)
             val needsAudio = req.resources.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE)
-
             val okVideo = !needsVideo || grantedCamera
             val okAudio = !needsAudio || grantedMic
-
-            if (okVideo && okAudio) {
-                req.grant(req.resources)
-            } else {
-                req.deny()
-            }
+            if (okVideo && okAudio) req.grant(req.resources) else req.deny()
             pendingWebPermission = null
         }
     }
@@ -191,9 +202,7 @@ class MainActivity : AppCompatActivity() {
         val need = mutableListOf<String>()
         if (!hasCamera()) need += Manifest.permission.CAMERA
         if (!hasMic()) need += Manifest.permission.RECORD_AUDIO
-        if (need.isNotEmpty()) {
-            reqCamMicPerms.launch(need.toTypedArray())
-        }
+        if (need.isNotEmpty()) reqCamMicPerms.launch(need.toTypedArray())
     }
 
     private fun ensureNotificationPermIfNeeded() {
@@ -205,6 +214,20 @@ class MainActivity : AppCompatActivity() {
     private fun normalizedBase(): String {
         val base = BuildConfig.BASE_URL.ifBlank { "https://manaus.prodestino.com" }
         return base.trimEnd('/') + "/"
+    }
+
+    private fun originMatchesBase(origin: String?): Boolean {
+        if (origin.isNullOrBlank()) return false
+        val base = normalizedBase().removeSuffix("/")
+        return try {
+            val o = Uri.parse(origin)
+            val b = Uri.parse(base)
+            val oHost = (o.host ?: "").lowercase()
+            val bHost = (b.host ?: "").lowercase()
+            val oScheme = (o.scheme ?: "https").lowercase()
+            val bScheme = (b.scheme ?: "https").lowercase()
+            (oHost == bHost) && (oScheme == bScheme)
+        } catch (_: Exception) { false }
     }
 
     private fun isOffline(): Boolean = isOfflineShown
@@ -230,8 +253,7 @@ class MainActivity : AppCompatActivity() {
         if (!pageReady) return
         if (!hasFineOrCoarse()) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasNotifPermission()) {
-            ensureNotificationPermIfNeeded()
-            return
+            ensureNotificationPermIfNeeded(); return
         }
         try {
             ForegroundLocationService.start(this)
@@ -244,17 +266,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     // =======================
-    // WebView (offline inline + clients)
+    // WebView
     // =======================
     @SuppressLint("SetJavaScriptEnabled")
     private fun initWebViewIfNeeded() {
         if (this::webView.isInitialized && webView.url != null) return
 
         webView = WebView(this)
-
-        // Aceleração HW off para estabilidade
-        webView.setLayerType(View.LAYER_TYPE_SOFTWARE, null)
-
+        // **Não** force software rendering (mantém aceleração de hardware)
         setContentView(webView)
 
         val s = webView.settings
@@ -269,7 +288,7 @@ class MainActivity : AppCompatActivity() {
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
 
-        // Bloqueio de Service Worker (mantido)
+        // Bloqueio de Service Worker
         try {
             if (Build.VERSION.SDK_INT >= 24) {
                 val swc = ServiceWorkerController.getInstance()
@@ -292,13 +311,7 @@ class MainActivity : AppCompatActivity() {
             private fun showOfflineInline() {
                 if (isOfflineShown) return
                 isOfflineShown = true
-                webView.loadDataWithBaseURL(
-                    base,
-                    OFFLINE_HTML,
-                    "text/html",
-                    "UTF-8",
-                    null
-                )
+                webView.loadDataWithBaseURL(base, OFFLINE_HTML, "text/html", "UTF-8", null)
             }
 
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
@@ -336,23 +349,15 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
-                if (request.isForMainFrame && errorResponse.statusCode >= 400) {
-                    vibrate()
-                    showOfflineInline()
-                }
+                if (request.isForMainFrame && errorResponse.statusCode >= 400) { vibrate(); showOfflineInline() }
             }
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: android.webkit.WebResourceError) {
-                if (request.isForMainFrame) {
-                    vibrate()
-                    showOfflineInline()
-                }
+                if (request.isForMainFrame) { vibrate(); showOfflineInline() }
             }
 
             override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
-                vibrate()
-                handler.cancel()
-                showOfflineInline()
+                vibrate(); handler.cancel(); showOfflineInline()
             }
 
             override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
@@ -378,48 +383,50 @@ class MainActivity : AppCompatActivity() {
         }
 
         webView.webChromeClient = object : WebChromeClient() {
-            // 1) Geolocalização do HTML5 — mantém fluxo atual + dispara permissão se faltar
+
+            // Geolocalização HTML5
             override fun onGeolocationPermissionsShowPrompt(origin: String?, callback: GeolocationPermissions.Callback?) {
-                val allow = hasFineOrCoarse() && origin?.startsWith(base) == true
+                val allow = hasFineOrCoarse() && originMatchesBase(origin)
                 callback?.invoke(origin, allow, false)
                 if (!allow && !hasFineOrCoarse()) ensureForegroundLocationOnce()
             }
 
-            // 2) getUserMedia (câmera/microfone pelo WebView)
+            // getUserMedia (câmera/microfone)
             override fun onPermissionRequest(request: PermissionRequest) {
-                val originOk = request.origin?.toString()?.startsWith(base) == true
+                val originOk = originMatchesBase(request.origin?.toString())
                 val resources = request.resources ?: emptyArray()
-
                 val needsVideo = resources.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE)
                 val needsAudio = resources.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE)
 
-                // Se for de outra origem, por segurança, nega
-                if (!originOk) {
-                    request.deny()
-                    return
-                }
+                if (!originOk) { request.deny(); return }
 
-                // Se já temos as permissões do Android:
-                val haveEverything =
-                    (!needsVideo || hasCamera()) && (!needsAudio || hasMic())
+                val haveEverything = (!needsVideo || hasCamera()) && (!needsAudio || hasMic())
+                if (haveEverything) { request.grant(resources); return }
 
-                if (haveEverything) {
-                    request.grant(resources)
-                    return
-                }
-
-                // Senão, pede ao usuário e segura o request até o callback
                 pendingWebPermission = request
                 val need = mutableListOf<String>()
                 if (needsVideo && !hasCamera()) need += Manifest.permission.CAMERA
                 if (needsAudio && !hasMic()) need += Manifest.permission.RECORD_AUDIO
-                if (need.isNotEmpty()) {
-                    reqCamMicPerms.launch(need.toTypedArray())
-                } else {
-                    // fallback: se por algum motivo não há nada a pedir, nega
-                    request.deny()
-                    pendingWebPermission = null
+                if (need.isNotEmpty()) reqCamMicPerms.launch(need.toTypedArray()) else { request.deny(); pendingWebPermission = null }
+            }
+
+            // File chooser para <input type="file">
+            override fun onShowFileChooser(
+                webView: WebView?,
+                filePathCallback: ValueCallback<Array<Uri>>?,
+                fileChooserParams: FileChooserParams?
+            ): Boolean {
+                this@MainActivity.filePathCallback?.onReceiveValue(null)
+                this@MainActivity.filePathCallback = filePathCallback
+
+                val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "*/*"
+                    putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "application/pdf"))
                 }
+                val chooser = Intent.createChooser(intent, "Selecionar arquivo")
+                fileChooserLauncher.launch(chooser)
+                return true
             }
         }
 
@@ -438,9 +445,8 @@ class MainActivity : AppCompatActivity() {
     private fun recoverFromOfflineOnce() {
         if (!isOffline()) return
         val now = SystemClock.elapsedRealtime()
-        if (now - lastRecoverAt < 6000L) return // debounce conservador
+        if (now - lastRecoverAt < 6000L) return
         lastRecoverAt = now
-
         val target = (lastGoodUrl ?: normalizedBase())
         webView.post {
             try {
@@ -462,7 +468,6 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Exception) {}
 
         webView = WebView(this)
-        webView.setLayerType(View.LAYER_TYPE_SOFTWARE, null)
         setContentView(webView)
 
         val s = webView.settings
@@ -577,12 +582,12 @@ class MainActivity : AppCompatActivity() {
 
         webView.webChromeClient = object : WebChromeClient() {
             override fun onGeolocationPermissionsShowPrompt(origin: String?, callback: GeolocationPermissions.Callback?) {
-                val allow = hasFineOrCoarse() && origin?.startsWith(base) == true
+                val allow = hasFineOrCoarse() && originMatchesBase(origin)
                 callback?.invoke(origin, allow, false)
                 if (!allow && !hasFineOrCoarse()) ensureForegroundLocationOnce()
             }
             override fun onPermissionRequest(request: PermissionRequest) {
-                val originOk = request.origin?.toString()?.startsWith(base) == true
+                val originOk = originMatchesBase(request.origin?.toString())
                 val resources = request.resources ?: emptyArray()
                 val needsVideo = resources.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE)
                 val needsAudio = resources.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE)
@@ -594,6 +599,22 @@ class MainActivity : AppCompatActivity() {
                 if (needsVideo && !hasCamera()) need += Manifest.permission.CAMERA
                 if (needsAudio && !hasMic()) need += Manifest.permission.RECORD_AUDIO
                 if (need.isNotEmpty()) reqCamMicPerms.launch(need.toTypedArray()) else { request.deny(); pendingWebPermission = null }
+            }
+            override fun onShowFileChooser(
+                webView: WebView?,
+                filePathCallback: ValueCallback<Array<Uri>>?,
+                fileChooserParams: FileChooserParams?
+            ): Boolean {
+                this@MainActivity.filePathCallback?.onReceiveValue(null)
+                this@MainActivity.filePathCallback = filePathCallback
+                val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "*/*"
+                    putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "application/pdf"))
+                }
+                val chooser = Intent.createChooser(intent, "Selecionar arquivo")
+                fileChooserLauncher.launch(chooser)
+                return true
             }
         }
 
@@ -613,7 +634,10 @@ class MainActivity : AppCompatActivity() {
             WindowManager.LayoutParams.FLAG_SECURE
         )
 
-        // Garante que os diálogos abram cedo
+        // Inicializa WebView já no boot (independente das permissões)
+        initWebViewIfNeeded()
+
+        // Pede permissões conforme necessidade
         ensureForegroundLocationOnce()
         ensureCamMicOnce()
         ensureNotificationPermIfNeeded()
@@ -631,7 +655,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             cm.registerDefaultNetworkCallback(netCb!!)
-        } catch (_: Exception) { /* alguns OEMs personalizam CM */ }
+        } catch (_: Exception) { }
     }
 
     override fun onResume() {
@@ -700,15 +724,17 @@ class MainActivity : AppCompatActivity() {
         if (!resumed) return
         if (!hasFineOrCoarse()) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasNotifPermission()) {
-            ensureNotificationPermIfNeeded()
-            return
+            ensureNotificationPermIfNeeded(); return
         }
         if (!bootCompletedOnce) {
             bootCompletedOnce = true
             ui.postDelayed({
-                initWebViewIfNeeded()
                 maybeStartService()
-            }, 350L)
+            }, 250L)
         }
     }
+
+    // ===== auxiliares de recriação =====
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun initWebViewClientsForRecreatedInstance() { /* substituído acima; mantido por compat */ }
 }
