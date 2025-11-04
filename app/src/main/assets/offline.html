@@ -1,155 +1,192 @@
 <!doctype html>
-<html lang="pt-br">
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Reconectando…</title>
-<!-- Cabeçalhos contra cache desta página -->
-<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0">
-<meta http-equiv="Pragma" content="no-cache">
-<meta http-equiv="Expires" content="0">
-<style>
-  :root{color-scheme:light only}
-  body{font-family:system-ui,Arial,sans-serif;margin:0;display:grid;place-items:center;min-height:100vh;background:#f7f7f7}
-  .card{max-width:460px;margin:24px;padding:24px;text-align:center;border-radius:16px;box-shadow:0 8px 30px rgba(0,0,0,.08);background:#fff}
-  h1{font-size:18px;margin:0 0 8px}
-  p{color:#555;margin:0 0 16px}
-  button{padding:10px 14px;border:0;border-radius:12px;cursor:pointer;background:#0a7cff;color:#fff}
-  small{display:block;margin-top:10px;color:#777;min-height:1.2em}
-</style>
-
-<div class="card" role="status" aria-live="polite">
-  <h1>Sem conexão</h1>
-  <p>Estamos tentando reconectar…</p>
-  <button id="tryBtn" type="button">Tentar agora</button>
-  <small id="status">Aguardando rede…</small>
-</div>
-
-<script>
-(() => {
-  // ===== Configurações internas (sem expor URLs) =====
-  const TRY_TIMEOUT_MS = 4000;           // tempo máx. por tentativa de fetch
-  const QUIET_RETRY_DELAY_MS = 7000;     // fallback de nova tentativa (quando a aba está visível)
-  const MIN_RELOAD_GUARD_MS = 8000;      // evita recarregar em sequência
-
-  const $status = document.getElementById('status');
-  const $try    = document.getElementById('tryBtn');
-
-  // Chave usada para evitar loops de reload
-  const GUARD_KEY = '__offline_reload_ts';
-
-  const setStatus = (t) => { if ($status) $status.textContent = t || ''; };
-
-  // Timeout helper
-  const withTimeout = (p, ms) => Promise.race([
-    p,
-    new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')), ms))
-  ]);
-
-  // Atualiza SW (se existir) e limpa caches — silencioso
-  async function refreshSWAndCachesSilently() {
-    try {
-      if ('serviceWorker' in navigator) {
-        const regs = await navigator.serviceWorker.getRegistrations();
-        await Promise.all(regs.map(r => r.update().catch(()=>{})));
-      }
-      if ('caches' in window) {
-        const keys = await caches.keys();
-        await Promise.all(keys.map(k => caches.delete(k).catch(()=>{})));
-      }
-    } catch(_) { /* silencioso */ }
-  }
-
-  // Teste real de conectividade SEM expor rotas:
-  //  - '.' (a própria página) com cache desativado
-  //  - 'favicon.ico' (leve), também sem cache
-  // Qualquer 200 já é suficiente.
-  async function probeConnectivity() {
-    // Mesmo que navigator.onLine seja falso/verdadeiro, validamos por fetch real
-    const candidates = ['.', 'favicon.ico'];
-    for (const path of candidates) {
-      try {
-        const res = await withTimeout(fetch(path, {
-          method: 'GET',
-          cache: 'no-store',
-          credentials: 'include',
-          headers: {'Cache-Control':'no-store','Pragma':'no-cache'}
-        }), TRY_TIMEOUT_MS);
-        if (res && res.ok) return true;
-      } catch(_) {
-        // tenta o próximo
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light dark" />
+  <meta name="theme-color" content="#0ea5e9" />
+  <title>Offline</title>
+  <style>
+    :root{
+      --bg: #0b1220;
+      --fg: #e5f0ff;
+      --muted:#98a2b3;
+      --accent:#0ea5e9;
+      --ring:#60a5fa33;
+      --card:#0f172a;
+      --shadow: 0 10px 30px rgba(0,0,0,.25);
+    }
+    @media (prefers-color-scheme: light){
+      :root{
+        --bg:#f8fafc;
+        --fg:#0f172a;
+        --muted:#64748b;
+        --accent:#0284c7;
+        --ring:#0284c71f;
+        --card:#ffffff;
+        --shadow: 0 10px 30px rgba(2,8,23,.08);
       }
     }
-    return false;
-  }
 
-  function canReloadNow() {
-    const last = Number(sessionStorage.getItem(GUARD_KEY) || '0');
-    return Date.now() - last >= MIN_RELOAD_GUARD_MS;
-  }
-
-  function markReload() {
-    sessionStorage.setItem(GUARD_KEY, String(Date.now()));
-  }
-
-  async function safeReloadSamePage() {
-    // Marca para evitar loops
-    markReload();
-    // Tenta minimizar “prisão” da versão offline antes do reload
-    await refreshSWAndCachesSilently();
-    // Recarrega a MESMA URL (sem expor caminho algum)
-    location.reload();
-  }
-
-  // Fluxo principal de tentativa
-  let trying = false;
-  async function tryReconnect() {
-    if (trying) return;
-    trying = true;
-    try {
-      setStatus('Verificando conexão…');
-      const ok = await probeConnectivity();
-      if (ok && canReloadNow()) {
-        setStatus('Conexão restabelecida.');
-        await safeReloadSamePage();
-        return;
-      }
-      // Falhou ou guard bloqueou — mantemos a tela, sem navegar
-      setStatus('Sem resposta do servidor. Tente novamente em instantes.');
-    } finally {
-      trying = false;
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      background: radial-gradient(1200px 800px at 50% -100px, var(--ring), transparent 60%), var(--bg);
+      color: var(--fg);
+      font: 500 16px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+      display: grid;
+      place-items: center;
     }
-  }
 
-  // Botão único
-  $try?.addEventListener('click', tryReconnect);
-
-  // Eventos do navegador (sem agressividade)
-  window.addEventListener('online', () => {
-    // Quando o SO sinaliza "online", tentamos, mas respeitando guard
-    if (document.visibilityState === 'visible') tryReconnect();
-  });
-
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-      // Ao voltar para a tela, faz uma tentativa suave
-      setTimeout(() => tryReconnect(), 300);
+    .card {
+      width: min(560px, 92vw);
+      background: var(--card);
+      border-radius: 20px;
+      box-shadow: var(--shadow);
+      padding: 28px 28px 32px;
+      text-align: center;
+      border: 1px solid rgba(255,255,255,.06);
     }
-  });
-
-  // Fallback de tentativa esporádica (sem loops rápidos)
-  let retryTimer = null;
-  function scheduleQuietRetry() {
-    clearTimeout(retryTimer);
-    if (document.visibilityState === 'visible') {
-      retryTimer = setTimeout(() => tryReconnect(), QUIET_RETRY_DELAY_MS);
+    .art {
+      width: 140px; height: 140px; margin: 8px auto 18px; position: relative;
+      filter: drop-shadow(0 6px 16px rgba(0,0,0,.25));
     }
-  }
-  document.addEventListener('visibilitychange', scheduleQuietRetry);
-  window.addEventListener('online', scheduleQuietRetry);
+    /* Animações sutis */
+    .pulse { animation: pulse 2.4s ease-in-out infinite; transform-origin: 50% 50%; }
+    @keyframes pulse {
+      0% { transform: scale(1); opacity: 1;}
+      50%{ transform: scale(1.04); opacity: .96;}
+      100%{ transform: scale(1); opacity: 1;}
+    }
+    .wave { animation: wave 2.4s ease-in-out infinite; }
+    @keyframes wave {
+      0% { opacity:.35; transform: translateY(0);}
+      50%{ opacity:.12; transform: translateY(4px);}
+      100%{ opacity:.35; transform: translateY(0);}
+    }
 
-  // Primeira tentativa ao abrir
-  tryReconnect();
-  scheduleQuietRetry();
-})();
-</script>
+    h1 {
+      font-size: clamp(20px, 3.8vw, 28px);
+      margin: 0 0 6px;
+      letter-spacing: .2px;
+    }
+    p {
+      margin: 8px 0 0;
+      color: var(--muted);
+    }
+
+    .counter {
+      display: inline-flex; gap: 6px; align-items: baseline;
+      margin-top: 16px;
+      font-weight: 600;
+    }
+    .counter .num {
+      display:inline-block;
+      min-width: 1ch;
+      font-variant-numeric: tabular-nums;
+      font-size: 28px;
+      line-height: 1;
+      padding: 6px 10px;
+      border-radius: 10px;
+      background: linear-gradient(180deg, rgba(14,165,233,.14), rgba(14,165,233,.06));
+      border: 1px solid rgba(14,165,233,.25);
+      color: var(--accent);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
+    }
+
+    .foot {
+      margin-top: 22px;
+      font-size: 13px;
+      color: var(--muted);
+      opacity: .9;
+    }
+  </style>
+</head>
+<body>
+  <main class="card" role="main" aria-live="polite">
+    <!-- Ilustração SVG leve (plug desconectado) -->
+    <div class="art" aria-hidden="true">
+      <svg viewBox="0 0 160 160" width="140" height="140">
+        <!-- halo -->
+        <circle class="wave" cx="80" cy="80" r="70" fill="none" stroke="url(#g1)" stroke-width="2"/>
+        <defs>
+          <linearGradient id="g1" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stop-color="var(--accent)" stop-opacity=".35"/>
+            <stop offset="100%" stop-color="var(--accent)" stop-opacity=".05"/>
+          </linearGradient>
+        </defs>
+        <!-- base -->
+        <rect x="44" y="60" rx="10" ry="10" width="72" height="48" fill="var(--bg)" stroke="var(--accent)" stroke-width="2.5"/>
+        <!-- pinos -->
+        <rect x="54" y="50" width="10" height="16" rx="3" fill="var(--accent)" opacity=".9"/>
+        <rect x="96" y="50" width="10" height="16" rx="3" fill="var(--accent)" opacity=".9"/>
+        <!-- cabo -->
+        <path d="M116 84 C136 84, 144 96, 144 110 S132 136, 110 136" fill="none" stroke="var(--accent)" stroke-width="3" stroke-dasharray="6 6"/>
+        <!-- X (desconectado) -->
+        <g class="pulse" transform="translate(64,82)">
+          <path d="M0 0 L32 32 M32 0 L0 32" stroke="var(--accent)" stroke-width="3" stroke-linecap="round"/>
+        </g>
+      </svg>
+    </div>
+
+    <h1>Sem conexão</h1>
+    <p>Assim que a internet voltar, retornaremos automaticamente.</p>
+
+    <div class="counter" aria-label="Tentando conexão novamente">
+      <span>Tentando conexão novamente em</span>
+      <span class="num" id="count">3</span>
+      <span>…</span>
+    </div>
+
+    <p class="foot">Não é preciso tocar em nada.</p>
+  </main>
+
+  <script>
+    (function(){
+      'use strict';
+
+      // Evita múltiplas saídas
+      let leftOnce = false;
+      const leave = () => {
+        if (leftOnce) return;
+        leftOnce = true;
+        // pequeno atraso para renderizar a transição visual
+        setTimeout(() => {
+          // Opção A: voltar no histórico. Sem fallback para não mudar seu fluxo.
+          history.back();
+        }, 120);
+      };
+
+      // 1) Listener de conectividade do navegador
+      window.addEventListener('online', leave, { once: true });
+
+      // 2) Heartbeat leve: confere navigator.onLine periodicamente
+      //    (boas WebViews disparam 'online', mas isso cobre casos teimosos)
+      const POLL_MS = 1500;
+      const poll = () => {
+        if (navigator.onLine) leave();
+      };
+      const pollId = setInterval(poll, POLL_MS);
+
+      // Limpa o intervalo se já saímos
+      document.addEventListener('visibilitychange', () => {
+        if (leftOnce) clearInterval(pollId);
+      });
+
+      // Contador 3 → 2 → 1 (loop visual)
+      const $count = document.getElementById('count');
+      let n = 3;
+      const tick = () => {
+        $count.textContent = String(n);
+        n = (n <= 1) ? 3 : (n - 1);
+      };
+      tick();
+      setInterval(tick, 1000);
+
+      // Se o app voltar do background com rede, também sai
+      window.addEventListener('focus', poll, { passive: true });
+    })();
+  </script>
+</body>
 </html>
