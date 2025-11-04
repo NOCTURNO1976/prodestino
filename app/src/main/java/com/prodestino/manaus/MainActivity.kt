@@ -505,6 +505,7 @@ class MainActivity : AppCompatActivity() {
         webView.loadUrl(if (targetUrl.isNotBlank()) targetUrl else base)
     }
 
+    // === ÚNICA definição (mantida) ===
     private fun initWebViewClientsForRecreatedInstance() {
         val base = normalizedBase()
 
@@ -617,9 +618,6 @@ class MainActivity : AppCompatActivity() {
                 return true
             }
         }
-
-        val startUrl = lastGoodUrl ?: base
-        webView.loadUrl(startUrl)
     }
 
     // =======================
@@ -733,8 +731,4 @@ class MainActivity : AppCompatActivity() {
             }, 250L)
         }
     }
-
-    // ===== auxiliares de recriação =====
-    @SuppressLint("SetJavaScriptEnabled")
-    private fun initWebViewClientsForRecreatedInstance() { /* substituído acima; mantido por compat */ }
 }
