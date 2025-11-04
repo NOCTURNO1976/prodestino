@@ -3,17 +3,33 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Reconectando…</title>
+
+<!-- Anti-cache desta página -->
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
+
+<!-- CSP rígida: nada externo, navegação só para a MESMA origem -->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; 
+               img-src 'self' data:;
+               style-src 'unsafe-inline';
+               script-src 'unsafe-inline';
+               connect-src 'self';
+               navigate-to 'self';
+               frame-ancestors 'none';
+               object-src 'none';
+               base-uri 'none';
+               form-action 'none'">
+
 <style>
   :root{color-scheme:light only}
+  html,body{height:100%}
   body{font-family:system-ui,Arial,sans-serif;margin:0;display:grid;place-items:center;min-height:100vh;background:#f7f7f7}
   .card{max-width:460px;margin:24px;padding:24px;text-align:center;border-radius:16px;box-shadow:0 8px 30px rgba(0,0,0,.08);background:#fff}
   h1{font-size:18px;margin:0 0 8px}
   p{color:#555;margin:0 0 16px}
   button{padding:10px 14px;border:0;border-radius:12px;cursor:pointer;background:#0a7cff;color:#fff}
-  button[disabled]{opacity:.6;cursor:not-allowed}
   small{display:block;margin-top:10px;color:#777;min-height:1.2em}
 </style>
 
@@ -21,70 +37,14 @@
   <h1>Sem conexão</h1>
   <p>Estamos tentando reconectar…</p>
   <button id="tryBtn" type="button">Tentar agora</button>
-  <small id="status">Aguardando rede…</small>
+  <small>Aguardando rede…</small>
 </div>
 
 <script>
-(() => {
-  const TRY_TIMEOUT_MS = 4000;     // tempo máx. por tentativa de fetch
-  const COOLDOWN_MS    = 3000;     // trava anti-toque repetido
-
-  const $status = document.getElementById('status');
-  const $try    = document.getElementById('tryBtn');
-
-  const setStatus = (t) => { if ($status) $status.textContent = t || ''; };
-
-  const withTimeout = (p, ms) => Promise.race([
-    p, new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')), ms))
-  ]);
-
-  // Teste real de conectividade (sem expor endpoints na interface)
-  async function probeConnectivity() {
-    const candidates = ['.', 'favicon.ico'];
-    for (const path of candidates) {
-      try {
-        const res = await withTimeout(fetch(path, {
-          method: 'GET',
-          cache: 'no-store',
-          credentials: 'include',
-          headers: {'Cache-Control':'no-store','Pragma':'no-cache'}
-        }), TRY_TIMEOUT_MS);
-        if (res && res.ok) return true;
-      } catch(_) { /* tenta próximo */ }
-    }
-    return false;
-  }
-
-  let cooling = false;
-  async function onTry() {
-    if (cooling) return;
-    cooling = true;
-    $try.disabled = true;
-    setStatus('Verificando conexão…');
-
-    try {
-      const ok = await probeConnectivity();
-      if (ok) {
-        setStatus('Conexão restabelecida. Atualizando…');
-        // Recarrega a MESMA URL, sem expor rota
-        location.reload();
-        return;
-      }
-      setStatus('Ainda sem resposta do servidor. Tente novamente em alguns segundos.');
-    } finally {
-      setTimeout(() => {
-        cooling = false;
-        $try.disabled = false;
-      }, COOLDOWN_MS);
-    }
-  }
-
-  // Nenhum evento automático que provoque reload.
-  // Nada de online/visibilitychange/setInterval — só no botão.
-  $try?.addEventListener('click', onTry);
-
-  // Mensagem inicial
-  setStatus('Aguardando rede…');
-})();
+  // Modo inerte total: sem timers, sem eventos automáticos, sem limpar cache/SW.
+  // O botão apenas recarrega a MESMA URL, sem expor caminhos.
+  document.getElementById('tryBtn')?.addEventListener('click', function () {
+    location.reload();
+  });
 </script>
 </html>
