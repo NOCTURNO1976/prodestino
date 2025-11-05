@@ -1,13 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<shape xmlns:android="http://schemas.android.com/apk/res/android"
-    android:shape="oval">
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
 
-    <!-- TAMANHO DA BOLHA: ajuste aqui (84dp, 92dp, 96dp...) -->
-    <size
-        android:width="42dp"
-        android:height="42dp" />
-
-    <!-- Cor de fundo levemente translúcida para destacar em qualquer tela -->
+    <!-- Fundo translúcido para destacar em qualquer tela -->
     <solid android:color="#F0FFFFFF" />
 
     <!-- Borda suave -->
@@ -15,7 +9,7 @@
         android:width="1dp"
         android:color="#22000000" />
 
-    <!-- Espaço interno para não “colar” a imagem na borda -->
+    <!-- Leve respiro interno -->
     <padding
         android:left="2dp"
         android:top="2dp"
