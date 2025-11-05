@@ -91,23 +91,53 @@ class MainActivity : AppCompatActivity() {
         """.trimIndent()
     }
 
-    // Preferências simples
+    // ===== Preferências simples =====
     private val uiPrefs by lazy { getSharedPreferences("app_prefs", MODE_PRIVATE) }
     private var lastGoodUrl: String?
         get() = uiPrefs.getString("last_good_url", null)
         set(v) { uiPrefs.edit().putString("last_good_url", v).apply() }
 
+    private fun isBubbleEnabled(): Boolean =
+        uiPrefs.getBoolean("bubble_enabled", false)
+
+    private fun setBubbleEnabled(enabled: Boolean) {
+        uiPrefs.edit().putBoolean("bubble_enabled", enabled).apply()
+    }
+
     // ===== Bridge exposto ao JavaScript =====
     private inner class WebBridge(private val ctx: Context) {
+
         /** Liga/Desliga a bolha (serviço de overlay) */
         @JavascriptInterface
         fun overlay(mode: String?) {
-            val action = when (mode?.lowercase()) {
-                "on"  -> OverlayService.ACTION_SHOW
-                "off" -> OverlayService.ACTION_HIDE
-                else  -> OverlayService.ACTION_TOGGLE
+            val m = (mode ?: "").lowercase()
+            when (m) {
+                "on" -> {
+                    setBubbleEnabled(true)
+                    if (hasOverlayPermissionInternal()) {
+                        startOverlayService(OverlayService.ACTION_SHOW)
+                    } else {
+                        requestOverlayPermissionIfNeeded()
+                    }
+                }
+                "off" -> {
+                    setBubbleEnabled(false)
+                    startOverlayService(OverlayService.ACTION_HIDE)
+                }
+                else -> { // toggle
+                    val newState = !isBubbleEnabled()
+                    setBubbleEnabled(newState)
+                    if (newState) {
+                        if (hasOverlayPermissionInternal()) {
+                            startOverlayService(OverlayService.ACTION_SHOW)
+                        } else {
+                            requestOverlayPermissionIfNeeded()
+                        }
+                    } else {
+                        startOverlayService(OverlayService.ACTION_HIDE)
+                    }
+                }
             }
-            startOverlayService(action)
         }
 
         /** Abre a tela do sistema para conceder a permissão de sobreposição */
@@ -119,6 +149,10 @@ class MainActivity : AppCompatActivity() {
         /** Retorna se o app já pode desenhar sobre outros apps */
         @JavascriptInterface
         fun hasOverlayPermission(): Boolean = hasOverlayPermissionInternal()
+
+        /** Estado atual desejado (persistido) da bolha */
+        @JavascriptInterface
+        fun isBubbleEnabled(): Boolean = this@MainActivity.isBubbleEnabled()
     }
 
     // ===== Utilitários de permissão/efeitos =====
@@ -602,8 +636,14 @@ class MainActivity : AppCompatActivity() {
         resumed = true
         hideSystemBars()
         proceedIfReady()
+
         // App visível → esconde a bolha
         startOverlayService(OverlayService.ACTION_HIDE)
+
+        // Se a permissão foi revogada, também desligamos a preferência
+        if (!hasOverlayPermissionInternal() && isBubbleEnabled()) {
+            setBubbleEnabled(false)
+        }
     }
 
     override fun onPause() {
@@ -614,8 +654,12 @@ class MainActivity : AppCompatActivity() {
     override fun onStop() {
         super.onStop()
         flushCookies()
-        // App em 2º plano → mostra a bolha (se permitido)
-        if (hasOverlayPermissionInternal()) startOverlayService(OverlayService.ACTION_SHOW)
+        // App em 2º plano → mostra a bolha somente se habilitada e com permissão
+        if (isBubbleEnabled() && hasOverlayPermissionInternal()) {
+            startOverlayService(OverlayService.ACTION_SHOW)
+        } else {
+            startOverlayService(OverlayService.ACTION_HIDE)
+        }
     }
 
     override fun onDestroy() {
