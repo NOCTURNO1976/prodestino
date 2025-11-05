@@ -2,7 +2,6 @@ package com.prodestino.manaus
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.app.ActivityManager
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -48,9 +47,6 @@ import java.io.ByteArrayInputStream
 
 class MainActivity : AppCompatActivity() {
 
-    // =======================
-    // Campos de estado
-    // =======================
     private lateinit var webView: WebView
     private var bootCompletedOnce = false
     private var resumed = false
@@ -63,20 +59,7 @@ class MainActivity : AppCompatActivity() {
 
     private val ui = Handler(Looper.getMainLooper())
 
-    private val prefs by lazy { getSharedPreferences("app_prefs", MODE_PRIVATE) }
-    private var lastGoodUrl: String?
-        get() = prefs.getString("last_good_url", null)
-        set(v) { prefs.edit().putString("last_good_url", v).apply() }
-
-    // Estado pretendido do overlay (fonte para sincronizar UI)
-    private var overlayDesired: Boolean
-        get() = prefs.getBoolean("overlay_desired_on", false)
-        set(v) { prefs.edit().putBoolean("overlay_desired_on", v).apply() }
-
-    // Pedido pendente de getUserMedia vindo do WebView
     private var pendingWebPermission: PermissionRequest? = null
-
-    // File chooser callback
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
     private val fileChooserLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -88,12 +71,11 @@ class MainActivity : AppCompatActivity() {
             val data = result.data
             val uri: Uri? = data?.data
             if (uri != null) callback.onReceiveValue(arrayOf(uri)) else callback.onReceiveValue(null)
-        } else callback.onReceiveValue(null)
+        } else {
+            callback.onReceiveValue(null)
+        }
     }
 
-    // =======================
-    // HTML offline (fallback)
-    // =======================
     private val OFFLINE_FALLBACK_HTML: String by lazy {
         """
         <!doctype html><html lang="pt-br"><meta charset="utf-8">
@@ -108,9 +90,37 @@ class MainActivity : AppCompatActivity() {
         """.trimIndent()
     }
 
-    // =======================
-    // Utilitários
-    // =======================
+    private val uiPrefs by lazy { getSharedPreferences("app_prefs", MODE_PRIVATE) }
+    private var lastGoodUrl: String?
+        get() = uiPrefs.getString("last_good_url", null)
+        set(v) { uiPrefs.edit().putString("last_good_url", v).apply() }
+
+    // ======= Bridge exposto ao JavaScript =======
+    private inner class WebBridge(private val ctx: Context) {
+
+        /** Ligar/Desligar a bolha (serviço de overlay) */
+        @JavascriptInterface
+        fun overlay(mode: String?) {
+            val action = when (mode?.lowercase()) {
+                "on"  -> OverlayService.ACTION_SHOW
+                "off" -> OverlayService.ACTION_HIDE
+                else  -> OverlayService.ACTION_TOGGLE
+            }
+            startOverlayService(action)
+        }
+
+        /** Abre a tela do sistema para conceder a permissão de sobreposição */
+        @JavascriptInterface
+        fun ensureOverlayPermission() {
+            requestOverlayPermissionIfNeeded() // abre as Configurações se faltar permissão
+        }
+
+        /** Retorna true/false se o app já pode desenhar sobre outros apps */
+        @JavascriptInterface
+        fun hasOverlayPermission(): Boolean = hasOverlayPermissionInternal()
+    }
+
+    // ======= Permissões utilitárias =======
     private fun vibrate(ms: Long = 60) {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -122,7 +132,8 @@ class MainActivity : AppCompatActivity() {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     v.vibrate(VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE))
                 } else {
-                    @Suppress("DEPRECATION") v.vibrate(ms)
+                    @Suppress("DEPRECATION")
+                    v.vibrate(ms)
                 }
             }
         } catch (_: Exception) { }
@@ -133,69 +144,34 @@ class MainActivity : AppCompatActivity() {
         val coarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
         return fine || coarse
     }
+
     private fun hasCamera(): Boolean =
         ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+
     private fun hasMic(): Boolean =
         ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+
     private fun hasNotifPermission(): Boolean =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
         else true
 
-    // ====== OVERLAY ======
-    private fun hasOverlayPermission(): Boolean = Settings.canDrawOverlays(this)
+    private fun hasOverlayPermissionInternal(): Boolean =
+        Settings.canDrawOverlays(this)
 
-    private fun ensureOverlayPermissionInternal(): Boolean {
-        if (hasOverlayPermission()) return true
-        return try {
+    private fun requestOverlayPermissionIfNeeded() {
+        if (!hasOverlayPermissionInternal()) {
             val i = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             startActivity(i)
-            false
-        } catch (_: Exception) { false }
-    }
-
-    private fun isOverlayRunning(): Boolean {
-        val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-        @Suppress("DEPRECATION")
-        return am.getRunningServices(Int.MAX_VALUE)
-            .any { it.service.className == "com.prodestino.manaus.overlay.OverlayService" }
-    }
-
-    private fun startOverlay(show: Boolean): Boolean {
-        if (show && !hasOverlayPermission()) return false
-        return try {
-            val i = Intent(this, OverlayService::class.java).apply {
-                action = if (show) OverlayService.ACTION_SHOW else OverlayService.ACTION_HIDE
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(i) else startService(i)
-            overlayDesired = show
-            true
-        } catch (_: Exception) { false }
-    }
-
-    // ====== Bridge exposto ao WebView ======
-    inner class WebAppBridge {
-        @JavascriptInterface
-        fun overlay(state: String?): Boolean {
-            val on = state.equals("on", true)
-            return startOverlay(on)
         }
-
-        @JavascriptInterface
-        fun getOverlayStatus(): String {
-            // Se conseguirmos detectar o serviço, ótimo; senão, reflita o "desejado"
-            val active = try { isOverlayRunning() } catch (_: Exception) { overlayDesired }
-            return if (active) "on" else "off"
-        }
-
-        @JavascriptInterface
-        fun ensureOverlayPermission(): Boolean = ensureOverlayPermissionInternal()
     }
 
-    // =======================
-    // Permissões e afins
-    // =======================
+    private fun startOverlayService(action: String) {
+        val i = Intent(this, OverlayService::class.java).apply { this.action = action }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(i) else startService(i)
+    }
+
     private val reqForegroundPerms = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { maybeStartService(); proceedIfReady() }
@@ -227,12 +203,14 @@ class MainActivity : AppCompatActivity() {
             ))
         }
     }
+
     private fun ensureCamMicOnce() {
         val need = mutableListOf<String>()
         if (!hasCamera()) need += Manifest.permission.CAMERA
         if (!hasMic())    need += Manifest.permission.RECORD_AUDIO
         if (need.isNotEmpty()) reqCamMicPerms.launch(need.toTypedArray())
     }
+
     private fun ensureNotificationPermIfNeeded() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasNotifPermission()) {
             reqNotifPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -243,26 +221,33 @@ class MainActivity : AppCompatActivity() {
         val base = BuildConfig.BASE_URL.ifBlank { "https://manaus.prodestino.com" }
         return base.trimEnd('/') + "/"
     }
+
     private fun originMatchesBase(origin: String?): Boolean {
         if (origin.isNullOrBlank()) return false
         val base = normalizedBase().removeSuffix("/")
         return try {
-            val o = Uri.parse(origin); val b = Uri.parse(base)
-            val oHost = (o.host ?: "").lowercase(); val bHost = (b.host ?: "").lowercase()
-            val oScheme = (o.scheme ?: "https").lowercase(); val bScheme = (b.scheme ?: "https").lowercase()
+            val o = Uri.parse(origin)
+            val b = Uri.parse(base)
+            val oHost = (o.host ?: "").lowercase()
+            val bHost = (b.host ?: "").lowercase()
+            val oScheme = (o.scheme ?: "https").lowercase()
+            val bScheme = (b.scheme ?: "https").lowercase()
             (oHost == bHost) && (oScheme == bScheme)
         } catch (_: Exception) { false }
     }
 
     private fun isOffline(): Boolean = isOfflineShown
-    private fun saveWebCookie(cookie: String?) {
-        if (!cookie.isNullOrBlank()) prefs.edit().putString("web_cookie", cookie).apply()
-    }
-    private fun flushCookies() { try { CookieManager.getInstance().flush() } catch (_: Exception) {} }
 
-    // =======================
-    // Serviço (quando página pronta)
-    // =======================
+    private fun saveWebCookie(cookie: String?) {
+        if (!cookie.isNullOrBlank()) {
+            uiPrefs.edit().putString("web_cookie", cookie).apply()
+        }
+    }
+
+    private fun flushCookies() {
+        try { CookieManager.getInstance().flush() } catch (_: Exception) {}
+    }
+
     private fun maybeStartService() {
         if (serviceStarted) return
         if (!pageReady) return
@@ -274,13 +259,13 @@ class MainActivity : AppCompatActivity() {
             ForegroundLocationService.start(this)
             serviceStarted = true
         } catch (_: Throwable) {
-            ui.postDelayed({ try { ForegroundLocationService.start(this); serviceStarted = true } catch (_: Throwable) {} }, 1000L)
+            ui.postDelayed({
+                try { ForegroundLocationService.start(this); serviceStarted = true } catch (_: Throwable) {}
+            }, 1000L)
         }
     }
 
-    // =======================
-    // WebView
-    // =======================
+    // ============ WebView ============
     @SuppressLint("SetJavaScriptEnabled")
     private fun initWebViewIfNeeded() {
         if (this::webView.isInitialized && webView.url != null) return
@@ -300,10 +285,10 @@ class MainActivity : AppCompatActivity() {
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
 
-        // === Bridge disponível como "Android" ===
-        try { webView.addJavascriptInterface(WebAppBridge(), "Android") } catch (_: Exception) {}
+        // === Bridge JS → Android ===
+        webView.addJavascriptInterface(WebBridge(this), "Android")
 
-        // Bloqueio de Service Worker
+        // Bloqueia Service Worker
         try {
             if (Build.VERSION.SDK_INT >= 24) {
                 val swc = ServiceWorkerController.getInstance()
@@ -322,7 +307,6 @@ class MainActivity : AppCompatActivity() {
         val base = normalizedBase()
 
         webView.webViewClient = object : WebViewClient() {
-
             private fun showOfflineScreen() {
                 if (isOfflineShown) return
                 isOfflineShown = true
@@ -334,7 +318,7 @@ class MainActivity : AppCompatActivity() {
                 val uri = request.url
                 val scheme = uri.scheme?.lowercase() ?: return false
 
-                if (scheme in listOf("intent", "whatsapp", "tel", "mailto", "market")) {
+                if (scheme in listOf("intent","whatsapp","tel","mailto","market")) {
                     try {
                         val intent = Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME)
                         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -353,8 +337,7 @@ class MainActivity : AppCompatActivity() {
                             .encodedAuthority(host.trimEnd('.'))
                             .encodedPath(uri.encodedPath)
                             .encodedQuery(uri.encodedQuery)
-                            .build()
-                            .toString()
+                            .build().toString()
                         view.loadUrl(fixed)
                         return true
                     }
@@ -385,11 +368,11 @@ class MainActivity : AppCompatActivity() {
                 super.onPageFinished(view, url)
                 val isGood = url.startsWith(base)
                 if (isGood) {
-                  pageReady = true
-                  isOfflineShown = false
-                  lastGoodUrl = url
-                  try { saveWebCookie(CookieManager.getInstance().getCookie(base)) } catch (_: Exception) {}
-                  maybeStartService()
+                    pageReady = true
+                    isOfflineShown = false
+                    lastGoodUrl = url
+                    try { saveWebCookie(CookieManager.getInstance().getCookie(base)) } catch (_: Exception) {}
+                    maybeStartService()
                 }
             }
         }
@@ -407,14 +390,12 @@ class MainActivity : AppCompatActivity() {
                 val needsVideo = resources.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE)
                 val needsAudio = resources.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE)
                 if (!originOk) { request.deny(); return }
-
                 val haveEverything = (!needsVideo || hasCamera()) && (!needsAudio || hasMic())
                 if (haveEverything) { request.grant(resources); return }
-
                 pendingWebPermission = request
                 val need = mutableListOf<String>()
                 if (needsVideo && !hasCamera()) need += Manifest.permission.CAMERA
-                if (needsAudio && !hasMic()) need += Manifest.permission.RECORD_AUDIO
+                if (needsAudio && !hasMic())    need += Manifest.permission.RECORD_AUDIO
                 if (need.isNotEmpty()) reqCamMicPerms.launch(need.toTypedArray()) else { request.deny(); pendingWebPermission = null }
             }
 
@@ -426,7 +407,7 @@ class MainActivity : AppCompatActivity() {
                 val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
                     addCategory(Intent.CATEGORY_OPENABLE)
                     type = "*/*"
-                    putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "application/pdf"))
+                    putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*","application/pdf"))
                 }
                 val chooser = Intent.createChooser(intent, "Selecionar arquivo")
                 fileChooserLauncher.launch(chooser)
@@ -436,26 +417,6 @@ class MainActivity : AppCompatActivity() {
 
         val startUrl = lastGoodUrl ?: base
         webView.loadUrl(startUrl)
-    }
-
-    private fun showOfflineInline() {
-        if (!this::webView.isInitialized) return
-        if (isOfflineShown) return
-        isOfflineShown = true
-        try { webView.loadUrl("file:///android_asset/offline.html") }
-        catch (_: Throwable) { webView.loadDataWithBaseURL(normalizedBase(), OFFLINE_FALLBACK_HTML, "text/html", "UTF-8", null) }
-    }
-
-    private fun recoverFromOfflineOnce() {
-        if (!isOffline()) return
-        val now = SystemClock.elapsedRealtime()
-        if (now - lastRecoverAt < 6000L) return
-        lastRecoverAt = now
-        val target = (lastGoodUrl ?: normalizedBase())
-        webView.post {
-            try { isOfflineShown = false; webView.loadUrl(target) }
-            catch (_: Throwable) { safeRecreateWebView(target) }
-        }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -482,10 +443,10 @@ class MainActivity : AppCompatActivity() {
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
 
-        // Re-registra o bridge após recriar
-        try { webView.addJavascriptInterface(WebAppBridge(), "Android") } catch (_: Exception) {}
+        // Bridge JS → Android
+        webView.addJavascriptInterface(WebBridge(this), "Android")
 
-        // Reaplica bloqueio de Service Worker
+        // Bloqueio SW
         try {
             if (Build.VERSION.SDK_INT >= 24) {
                 val swc = ServiceWorkerController.getInstance()
@@ -508,7 +469,6 @@ class MainActivity : AppCompatActivity() {
         webView.loadUrl(if (targetUrl.isNotBlank()) targetUrl else base)
     }
 
-    // === Clientes para instância recriada ===
     private fun initWebViewClientsForRecreatedInstance() {
         val base = normalizedBase()
 
@@ -523,7 +483,7 @@ class MainActivity : AppCompatActivity() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val uri = request.url
                 val scheme = uri.scheme?.lowercase() ?: return false
-                if (scheme in listOf("intent", "whatsapp", "tel", "mailto", "market")) {
+                if (scheme in listOf("intent","whatsapp","tel","mailto","market")) {
                     try {
                         val intent = Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME)
                         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -541,8 +501,7 @@ class MainActivity : AppCompatActivity() {
                             .encodedAuthority(host.trimEnd('.'))
                             .encodedPath(uri.encodedPath)
                             .encodedQuery(uri.encodedQuery)
-                            .build()
-                            .toString()
+                            .build().toString()
                         view.loadUrl(fixed)
                         return true
                     }
@@ -554,17 +513,21 @@ class MainActivity : AppCompatActivity() {
             override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
                 if (request.isForMainFrame && errorResponse.statusCode >= 400) { vibrate(); showOfflineLocal() }
             }
+
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: android.webkit.WebResourceError) {
                 if (request.isForMainFrame) { vibrate(); showOfflineLocal() }
             }
+
             override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
                 vibrate(); handler.cancel(); showOfflineLocal()
             }
+
             override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
                 val target = (lastGoodUrl ?: base)
                 safeRecreateWebView(target)
                 return true
             }
+
             override fun onPageFinished(view: WebView, url: String) {
                 super.onPageFinished(view, url)
                 val isGood = url.startsWith(base)
@@ -595,18 +558,16 @@ class MainActivity : AppCompatActivity() {
                 pendingWebPermission = request
                 val need = mutableListOf<String>()
                 if (needsVideo && !hasCamera()) need += Manifest.permission.CAMERA
-                if (needsAudio && !hasMic()) need += Manifest.permission.RECORD_AUDIO
+                if (needsAudio && !hasMic())    need += Manifest.permission.RECORD_AUDIO
                 if (need.isNotEmpty()) reqCamMicPerms.launch(need.toTypedArray()) else { request.deny(); pendingWebPermission = null }
             }
-            override fun onShowFileChooser(
-                webView: WebView?, filePathCallback: ValueCallback<Array<Uri>>?, fileChooserParams: FileChooserParams?
-            ): Boolean {
+            override fun onShowFileChooser(webView: WebView?, filePathCallback: ValueCallback<Array<Uri>>?, fileChooserParams: FileChooserParams?): Boolean {
                 this@MainActivity.filePathCallback?.onReceiveValue(null)
                 this@MainActivity.filePathCallback = filePathCallback
                 val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
                     addCategory(Intent.CATEGORY_OPENABLE)
                     type = "*/*"
-                    putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "application/pdf"))
+                    putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*","application/pdf"))
                 }
                 val chooser = Intent.createChooser(intent, "Selecionar arquivo")
                 fileChooserLauncher.launch(chooser)
@@ -615,34 +576,31 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // =======================
-    // Lifecycle
-    // =======================
+    // ============ Lifecycle ============
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Protege contra prints/previews
+        // Bloqueia screenshots/previews
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
 
         initWebViewIfNeeded()
+
         ensureForegroundLocationOnce()
         ensureCamMicOnce()
         ensureNotificationPermIfNeeded()
         askIgnoreBatteryOptimizations()
 
-        // Monitor de rede
         try {
-            val cm = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
-            netCb = object : ConnectivityManager.NetworkCallback() {
-                override fun onAvailable(network: Network) {
-                    if (isOffline()) {
-                        vibrate(30)
-                        ui.postDelayed({ recoverFromOfflineOnce() }, 500L)
-                    }
-                }
-            }
-            cm.registerDefaultNetworkCallback(netCb!!)
-        } catch (_: Exception) { }
+          val cm = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
+          netCb = object : ConnectivityManager.NetworkCallback() {
+              override fun onAvailable(network: Network) {
+                  if (isOffline()) {
+                      ui.postDelayed({ recoverFromOfflineOnce() }, 500L)
+                  }
+              }
+          }
+          cm.registerDefaultNetworkCallback(netCb!!)
+        } catch (_: Exception) {}
     }
 
     override fun onResume() {
@@ -650,30 +608,8 @@ class MainActivity : AppCompatActivity() {
         resumed = true
         hideSystemBars()
         proceedIfReady()
-
-        // Ajusta o UI do botão do overlay na página (se existir)
-        if (this::webView.isInitialized) {
-            val st = if (try { isOverlayRunning() } catch (_: Exception) { overlayDesired }) "on" else "off"
-            val js = """
-                (function(){
-                  var b=document.getElementById('overlayBtn');
-                  if(!b) return;
-                  var on = ${if (st == "on") "true" else "false"};
-                  if (typeof setBtnState==='function'){
-                    setBtnState(b,on,{on:'Ativado',off:'Desativado'});
-                  } else {
-                    b.classList.toggle('on', on);
-                    b.classList.toggle('off', !on);
-                    b.dataset.state = on ? 'on' : 'off';
-                    b.textContent = on ? 'Ativado' : 'Desativado';
-                  }
-                })();
-            """.trimIndent()
-            try { webView.evaluateJavascript(js, null) } catch (_: Exception) {}
-        }
-
-        // App visível → esconder a bolha
-        startOverlay(show = false)
+        // App visível → esconda a bolha
+        startOverlayService(OverlayService.ACTION_HIDE)
     }
 
     override fun onPause() {
@@ -684,8 +620,8 @@ class MainActivity : AppCompatActivity() {
     override fun onStop() {
         super.onStop()
         flushCookies()
-        // App em 2º plano → mostrar a bolha apenas se o usuário quis
-        if (overlayDesired) startOverlay(show = true)
+        // App em 2º plano → mostra a bolha se houver permissão
+        if (hasOverlayPermissionInternal()) startOverlayService(OverlayService.ACTION_SHOW)
     }
 
     override fun onDestroy() {
@@ -698,13 +634,10 @@ class MainActivity : AppCompatActivity() {
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        if (this::webView.isInitialized && webView.canGoBack()) webView.goBack()
-        else super.onBackPressed()
+        if (this::webView.isInitialized && webView.canGoBack()) webView.goBack() else super.onBackPressed()
     }
 
-    // =======================
-    // Outros helpers
-    // =======================
+    // ============ Helpers ============
     private fun hideSystemBars() {
         if (Build.VERSION.SDK_INT >= 30) {
             window.insetsController?.let { c ->
@@ -731,7 +664,6 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Exception) { }
     }
 
-    /** Prossegue quando: em primeiro plano + localização OK + (13+) notificação OK */
     private fun proceedIfReady() {
         if (!resumed) return
         if (!hasFineOrCoarse()) return
@@ -741,6 +673,31 @@ class MainActivity : AppCompatActivity() {
         if (!bootCompletedOnce) {
             bootCompletedOnce = true
             ui.postDelayed({ maybeStartService() }, 250L)
+        }
+    }
+
+    private fun showOfflineInline() {
+        if (!this::webView.isInitialized) return
+        if (isOfflineShown) return
+        isOfflineShown = true
+        val base = normalizedBase()
+        try { webView.loadUrl("file:///android_asset/offline.html") }
+        catch (_: Throwable) { webView.loadDataWithBaseURL(base, OFFLINE_FALLBACK_HTML, "text/html", "UTF-8", null) }
+    }
+
+    private fun recoverFromOfflineOnce() {
+        if (!isOffline()) return
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastRecoverAt < 6000L) return
+        lastRecoverAt = now
+        val target = (lastGoodUrl ?: normalizedBase())
+        webView.post {
+            try {
+                isOfflineShown = false
+                webView.loadUrl(target)
+            } catch (_: Throwable) {
+                safeRecreateWebView(target)
+            }
         }
     }
 }
