@@ -173,9 +173,21 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Inicia o serviço da bolha com segurança:
+     * - SHOW/TOGGLE: usa startForegroundService (Android O+)
+     * - HIDE: usa startService (para não forçar startForeground sem necessidade)
+     */
     private fun startOverlayService(action: String) {
         val i = Intent(this, OverlayService::class.java).apply { this.action = action }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(i) else startService(i)
+        val isShow = action == OverlayService.ACTION_SHOW || action == OverlayService.ACTION_TOGGLE
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                if (isShow) startForegroundService(i) else startService(i)
+            } else {
+                startService(i)
+            }
+        } catch (_: Exception) { /* evita crash em OEMs mais restritos */ }
     }
 
     private val reqForegroundPerms = registerForActivityResult(
