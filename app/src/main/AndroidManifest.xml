@@ -7,10 +7,10 @@
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
 
-    <!-- Vibração (p/ feedback tátil) -->
+    <!-- Vibração (feedback tátil) -->
     <uses-permission android:name="android.permission.VIBRATE"/>
 
-    <!-- (Opcional, mas recomendado p/ iniciar/segurar CPU por pouco tempo no boot) -->
+    <!-- (Opcional) Wake lock curto p/ evitar doze durante inicializações -->
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
 
     <!-- Localização (primeiro plano) -->
@@ -19,19 +19,19 @@
 
     <!-- Foreground Service (Android 9+) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
-    <!-- Android 12+ exige informar o tipo usado pelo serviço -->
+    <!-- Tipo de FG usado pelo serviço de localização (Android 12+) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
 
-    <!-- Localização em 2º plano (REMOVA se não usar rastreio 24h) -->
+    <!-- Localização em 2º plano (REMOVA se não for rastrear 24h) -->
     <!-- <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/> -->
 
-    <!-- Receber boot (para iniciar com o sistema) -->
+    <!-- Receber boot (para restaurar tarefas ao reiniciar o aparelho) -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
 
-    <!-- Android 13+: notificações para o ForegroundService -->
+    <!-- Android 13+: permissão de notificações (ForegroundService) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
-    <!-- **Overlay clássico**: desenhar sobre outros apps (bolha) -->
+    <!-- Overlay (bolha) -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
 
     <!-- Evitar filtro de dispositivos na Play -->
@@ -47,7 +47,8 @@
         android:networkSecurityConfig="@xml/network_security_config"
         android:allowBackup="false">
 
-        <!-- FileProvider para uploads/câmera -->
+        <!-- FileProvider (necessário se usar câmera/upload nativo). 
+             Se não tiver @xml/file_paths, remova este bloco. -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -58,7 +59,7 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
-        <!-- Activity principal -->
+        <!-- Activity principal (WebView) -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -77,30 +78,20 @@
             android:exported="false"
             android:foregroundServiceType="location" />
 
-        <!-- **Serviço da bolha/overlay** (foreground p/ estabilidade) -->
+        <!-- Serviço da bolha/overlay (mantido em FG para estabilidade) -->
         <service
             android:name=".overlay.OverlayService"
             android:exported="false" />
 
-        <!-- Receiver de boot/atualização do app -->
-        <!--
-             IMPORTANTE:
-             - .location.BootReceiver deve existir e iniciar o que você precisa (ex.: serviço, agendamentos).
-             - directBootAware="true" permite receber LOCKED_BOOT_COMPLETED (antes do desbloqueio do usuário).
-        -->
+        <!-- Receiver de boot/atualização (remova se não existir a classe) -->
         <receiver
             android:name=".location.BootReceiver"
             android:enabled="true"
             android:exported="true"
             android:directBootAware="true">
             <intent-filter>
-                <!-- Dispara após o boot normal -->
                 <action android:name="android.intent.action.BOOT_COMPLETED"/>
-
-                <!-- Dispara antes do desbloqueio do usuário (se necessário) -->
                 <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED"/>
-
-                <!-- Dispara quando o app é atualizado (útil para re-agendar tarefas) -->
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
             </intent-filter>
         </receiver>
