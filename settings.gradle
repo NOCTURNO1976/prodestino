@@ -5,5 +5,12 @@ pluginManagement {
     gradlePluginPortal()
   }
 }
+dependencyResolutionManagement {
+  repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS) // use FAIL_ON_PROJECT_REPOS se quiser travar
+  repositories {
+    google()
+    mavenCentral()
+  }
+}
 rootProject.name = "ProDestinoWebView"
-include(":app")   // se o módulo tiver outro nome, troque aqui;;;
+include(":app")
