@@ -1,7 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
 
-    <!-- Fundo translúcido para destacar em qualquer tela -->
+    <!-- Diâmetro final da bolha -->
+    <size
+        android:width="48dp"
+        android:height="48dp" />
+
+    <!-- Fundo translúcido -->
     <solid android:color="#F0FFFFFF" />
 
     <!-- Borda suave -->
@@ -9,7 +15,7 @@
         android:width="1dp"
         android:color="#22000000" />
 
-    <!-- Leve respiro interno -->
+    <!-- Respiro interno pequeno (não inflar visualmente) -->
     <padding
         android:left="2dp"
         android:top="2dp"
