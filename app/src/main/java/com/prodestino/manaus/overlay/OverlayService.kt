@@ -1,19 +1,18 @@
 package com.prodestino.manaus.overlay
 
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.Service
+import android.app.*
 import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.Build
 import android.os.IBinder
 import android.view.*
-import android.widget.FrameLayout
+import android.widget.ImageView
 import androidx.core.app.NotificationCompat
 import com.prodestino.manaus.MainActivity
 import com.prodestino.manaus.R
 import kotlin.math.abs
+import kotlin.math.hypot
 
 class OverlayService : Service() {
 
@@ -37,10 +36,10 @@ class OverlayService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_SHOW -> show()
-            ACTION_HIDE -> hide()
+            ACTION_SHOW   -> show()
+            ACTION_HIDE   -> hide()
             ACTION_TOGGLE -> if (isShowing) hide() else show()
-            else -> show()
+            else          -> show()
         }
         return START_STICKY
     }
@@ -48,21 +47,20 @@ class OverlayService : Service() {
     private fun show() {
         if (isShowing) return
 
-        // Foreground para estabilidade
+        // Notificação necessária p/ serviço em 1º plano
         startForeground(
             NOTIF_ID,
             NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("Bolha ativa")
-                .setContentText("Toque para abrir o app")
-                .setSmallIcon(R.mipmap.ic_launcher) // usa o launcher existente
+                .setContentTitle("Atalho rápido")
+                .setContentText("Toque na bolha para abrir o app")
+                .setSmallIcon(R.mipmap.ic_launcher)
                 .setOngoing(true)
                 .setPriority(NotificationCompat.PRIORITY_MIN)
                 .build()
         )
 
         wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        val inflater = LayoutInflater.from(this)
-        overlayView = inflater.inflate(R.layout.overlay_bubble, null)
+        overlayView = LayoutInflater.from(this).inflate(R.layout.overlay_bubble, null)
 
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -73,69 +71,61 @@ class OverlayService : Service() {
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             type,
-            // NOT_FOCUSABLE permite interação e não rouba o foco de teclado
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                     WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.END
-            x = 24
-            y = 180
+            x = dpToPx(16)
+            y = dpToPx(160)
         }
 
-        // Clique: traz o app pra frente
+        // --- Clique: traz o app para frente
         overlayView?.setOnClickListener {
             try {
                 val i = Intent(this, MainActivity::class.java).apply {
-                    addFlags(
-                        Intent.FLAG_ACTIVITY_NEW_TASK or
-                                Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED or
-                                Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
-                    )
-                    action = Intent.ACTION_MAIN
-                    addCategory(Intent.CATEGORY_LAUNCHER)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or
+                             Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                             Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
                 }
                 startActivity(i)
-            } catch (_: Exception) { }
+            } catch (_: Exception) {}
         }
 
-        // Arrastar: segurar e mover a bolha
-        val touchSlop = ViewConfiguration.get(this).scaledTouchSlop
+        // --- Arrastar com "segurar e soltar"
         overlayView?.setOnTouchListener(object : View.OnTouchListener {
-            var downX = 0f
-            var downY = 0f
             var startX = 0
             var startY = 0
+            var touchStartX = 0f
+            var touchStartY = 0f
             var moved = false
 
-            override fun onTouch(v: View, event: MotionEvent): Boolean {
-                when (event.actionMasked) {
+            override fun onTouch(v: View, ev: MotionEvent): Boolean {
+                when (ev.actionMasked) {
                     MotionEvent.ACTION_DOWN -> {
                         moved = false
-                        downX = event.rawX
-                        downY = event.rawY
                         startX = params.x
                         startY = params.y
-                        return true
+                        touchStartX = ev.rawX
+                        touchStartY = ev.rawY
+                        return false // permite também o clique
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        val dx = (event.rawX - downX).toInt()
-                        val dy = (event.rawY - downY).toInt()
-                        if (!moved && (abs(dx) > touchSlop || abs(dy) > touchSlop)) {
+                        val dx = (ev.rawX - touchStartX).toInt()
+                        val dy = (ev.rawY - touchStartY).toInt()
+                        if (abs(dx) > dpToPx(3) || abs(dy) > dpToPx(3)) {
                             moved = true
-                        }
-                        if (moved) {
-                            params.x = startX - dx
+                            params.x = startX - dx // ancorado em RIGHT
                             params.y = startY + dy
-                            wm?.updateViewLayout(overlayView, params)
+                            try { wm?.updateViewLayout(overlayView, params) } catch (_: Exception) {}
                         }
                         return true
                     }
-                    MotionEvent.ACTION_UP -> {
-                        // se não moveu, deixa o clique do setOnClickListener acontecer
-                        return moved // true consume (evita clique), false deixa o click rolar
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        // Se quase não moveu, deixa o clique acontecer
+                        val dist = hypot((ev.rawX - touchStartX), (ev.rawY - touchStartY))
+                        return dist > dpToPx(6) // true = consumiu (tratou como drag)
                     }
                 }
                 return false
@@ -162,8 +152,7 @@ class OverlayService : Service() {
             val mgr = getSystemService(NotificationManager::class.java)
             if (mgr.getNotificationChannel(CHANNEL_ID) == null) {
                 val ch = NotificationChannel(
-                    CHANNEL_ID,
-                    "Overlay",
+                    CHANNEL_ID, "Overlay",
                     NotificationManager.IMPORTANCE_MIN
                 )
                 ch.setShowBadge(false)
@@ -171,4 +160,7 @@ class OverlayService : Service() {
             }
         }
     }
+
+    private fun dpToPx(dp: Int): Int =
+        (dp * resources.displayMetrics.density).toInt()
 }
