@@ -27,9 +27,6 @@ import android.webkit.GeolocationPermissions
 import android.webkit.JavascriptInterface
 import android.webkit.PermissionRequest
 import android.webkit.RenderProcessGoneDetail
-import android.webkit.ServiceWorkerClient
-import android.webkit.ServiceWorkerController
-import android.webkit.ServiceWorkerWebSettings
 import android.webkit.SslErrorHandler
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -43,10 +40,10 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.prodestino.manaus.location.ForegroundLocationService
 import com.prodestino.manaus.overlay.OverlayService
-import java.io.ByteArrayInputStream
 
 class MainActivity : AppCompatActivity() {
 
+    // ===== Estado geral =====
     private lateinit var webView: WebView
     private var bootCompletedOnce = false
     private var resumed = false
@@ -59,7 +56,10 @@ class MainActivity : AppCompatActivity() {
 
     private val ui = Handler(Looper.getMainLooper())
 
+    // Permissões pendentes do getUserMedia
     private var pendingWebPermission: PermissionRequest? = null
+
+    // File chooser callback
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
     private val fileChooserLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -76,6 +76,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // Página offline (fallback interno, caso asset falhe)
     private val OFFLINE_FALLBACK_HTML: String by lazy {
         """
         <!doctype html><html lang="pt-br"><meta charset="utf-8">
@@ -90,15 +91,15 @@ class MainActivity : AppCompatActivity() {
         """.trimIndent()
     }
 
+    // Preferências simples
     private val uiPrefs by lazy { getSharedPreferences("app_prefs", MODE_PRIVATE) }
     private var lastGoodUrl: String?
         get() = uiPrefs.getString("last_good_url", null)
         set(v) { uiPrefs.edit().putString("last_good_url", v).apply() }
 
-    // ======= Bridge exposto ao JavaScript =======
+    // ===== Bridge exposto ao JavaScript =====
     private inner class WebBridge(private val ctx: Context) {
-
-        /** Ligar/Desligar a bolha (serviço de overlay) */
+        /** Liga/Desliga a bolha (serviço de overlay) */
         @JavascriptInterface
         fun overlay(mode: String?) {
             val action = when (mode?.lowercase()) {
@@ -112,20 +113,22 @@ class MainActivity : AppCompatActivity() {
         /** Abre a tela do sistema para conceder a permissão de sobreposição */
         @JavascriptInterface
         fun ensureOverlayPermission() {
-            requestOverlayPermissionIfNeeded() // abre as Configurações se faltar permissão
+            requestOverlayPermissionIfNeeded()
         }
 
-        /** Retorna true/false se o app já pode desenhar sobre outros apps */
+        /** Retorna se o app já pode desenhar sobre outros apps */
         @JavascriptInterface
         fun hasOverlayPermission(): Boolean = hasOverlayPermissionInternal()
     }
 
-    // ======= Permissões utilitárias =======
+    // ===== Utilitários de permissão/efeitos =====
     private fun vibrate(ms: Long = 60) {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 val vm = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
-                vm.defaultVibrator.vibrate(VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE))
+                vm.defaultVibrator.vibrate(
+                    VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE)
+                )
             } else {
                 @Suppress("DEPRECATION")
                 val v = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
@@ -161,7 +164,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun requestOverlayPermissionIfNeeded() {
         if (!hasOverlayPermissionInternal()) {
-            val i = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
+            val i = Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:$packageName")
+            )
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             startActivity(i)
         }
@@ -197,10 +203,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun ensureForegroundLocationOnce() {
         if (!hasFineOrCoarse()) {
-            reqForegroundPerms.launch(arrayOf(
-                Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.ACCESS_COARSE_LOCATION
-            ))
+            reqForegroundPerms.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
         }
     }
 
@@ -265,7 +273,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ============ WebView ============
+    // ===== WebView (sem Service Worker) =====
     @SuppressLint("SetJavaScriptEnabled")
     private fun initWebViewIfNeeded() {
         if (this::webView.isInitialized && webView.url != null) return
@@ -285,24 +293,8 @@ class MainActivity : AppCompatActivity() {
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
 
-        // === Bridge JS → Android ===
+        // Bridge JS → Android
         webView.addJavascriptInterface(WebBridge(this), "Android")
-
-        // Bloqueia Service Worker
-        try {
-            if (Build.VERSION.SDK_INT >= 24) {
-                val swc = ServiceWorkerController.getInstance()
-                val sws: ServiceWorkerWebSettings = swc.serviceWorkerWebSettings
-                sws.setAllowContentAccess(false)
-                sws.setAllowFileAccess(false)
-                sws.setBlockNetworkLoads(true)
-                swc.setServiceWorkerClient(object : ServiceWorkerClient() {
-                    override fun shouldInterceptRequest(request: WebResourceRequest): WebResourceResponse? {
-                        return WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
-                    }
-                })
-            }
-        } catch (_: Throwable) { }
 
         val base = normalizedBase()
 
@@ -446,22 +438,6 @@ class MainActivity : AppCompatActivity() {
         // Bridge JS → Android
         webView.addJavascriptInterface(WebBridge(this), "Android")
 
-        // Bloqueio SW
-        try {
-            if (Build.VERSION.SDK_INT >= 24) {
-                val swc = ServiceWorkerController.getInstance()
-                val sws: ServiceWorkerWebSettings = swc.serviceWorkerWebSettings
-                sws.setAllowContentAccess(false)
-                sws.setAllowFileAccess(false)
-                sws.setBlockNetworkLoads(true)
-                swc.setServiceWorkerClient(object : ServiceWorkerClient() {
-                    override fun shouldInterceptRequest(request: WebResourceRequest): WebResourceResponse? {
-                        return WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
-                    }
-                })
-            }
-        } catch (_: Throwable) { }
-
         initWebViewClientsForRecreatedInstance()
 
         val base = normalizedBase()
@@ -561,7 +537,9 @@ class MainActivity : AppCompatActivity() {
                 if (needsAudio && !hasMic())    need += Manifest.permission.RECORD_AUDIO
                 if (need.isNotEmpty()) reqCamMicPerms.launch(need.toTypedArray()) else { request.deny(); pendingWebPermission = null }
             }
-            override fun onShowFileChooser(webView: WebView?, filePathCallback: ValueCallback<Array<Uri>>?, fileChooserParams: FileChooserParams?): Boolean {
+            override fun onShowFileChooser(
+                webView: WebView?, filePathCallback: ValueCallback<Array<Uri>>?, fileChooserParams: FileChooserParams?
+            ): Boolean {
                 this@MainActivity.filePathCallback?.onReceiveValue(null)
                 this@MainActivity.filePathCallback = filePathCallback
                 val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
@@ -576,12 +554,15 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ============ Lifecycle ============
+    // ===== Lifecycle =====
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         // Bloqueia screenshots/previews
-        window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
+        window.setFlags(
+            WindowManager.LayoutParams.FLAG_SECURE,
+            WindowManager.LayoutParams.FLAG_SECURE
+        )
 
         initWebViewIfNeeded()
 
@@ -590,17 +571,18 @@ class MainActivity : AppCompatActivity() {
         ensureNotificationPermIfNeeded()
         askIgnoreBatteryOptimizations()
 
+        // Listener de rede para recuperar da offline.html
         try {
-          val cm = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
-          netCb = object : ConnectivityManager.NetworkCallback() {
-              override fun onAvailable(network: Network) {
-                  if (isOffline()) {
-                      ui.postDelayed({ recoverFromOfflineOnce() }, 500L)
-                  }
-              }
-          }
-          cm.registerDefaultNetworkCallback(netCb!!)
-        } catch (_: Exception) {}
+            val cm = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
+            netCb = object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    if (isOffline()) {
+                        ui.postDelayed({ recoverFromOfflineOnce() }, 500L)
+                    }
+                }
+            }
+            cm.registerDefaultNetworkCallback(netCb!!)
+        } catch (_: Exception) { }
     }
 
     override fun onResume() {
@@ -608,7 +590,7 @@ class MainActivity : AppCompatActivity() {
         resumed = true
         hideSystemBars()
         proceedIfReady()
-        // App visível → esconda a bolha
+        // App visível → esconde a bolha
         startOverlayService(OverlayService.ACTION_HIDE)
     }
 
@@ -620,7 +602,7 @@ class MainActivity : AppCompatActivity() {
     override fun onStop() {
         super.onStop()
         flushCookies()
-        // App em 2º plano → mostra a bolha se houver permissão
+        // App em 2º plano → mostra a bolha (se permitido)
         if (hasOverlayPermissionInternal()) startOverlayService(OverlayService.ACTION_SHOW)
     }
 
@@ -637,12 +619,13 @@ class MainActivity : AppCompatActivity() {
         if (this::webView.isInitialized && webView.canGoBack()) webView.goBack() else super.onBackPressed()
     }
 
-    // ============ Helpers ============
+    // ===== Helpers =====
     private fun hideSystemBars() {
         if (Build.VERSION.SDK_INT >= 30) {
             window.insetsController?.let { c ->
                 c.hide(android.view.WindowInsets.Type.navigationBars())
-                c.systemBarsBehavior = android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                c.systemBarsBehavior =
+                    android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             }
         } else {
             @Suppress("DEPRECATION")
@@ -664,6 +647,7 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Exception) { }
     }
 
+    /** Prossegue quando: app visível + localização OK + (13+) notificação OK */
     private fun proceedIfReady() {
         if (!resumed) return
         if (!hasFineOrCoarse()) return
