@@ -73,8 +73,8 @@ class OverlayService : Service() {
 
         // <<< ÚNICO AJUSTE DE TAMANHO: 56dp x 56dp >>>
         val params = WindowManager.LayoutParams(
-            dpToPx(36), // largura fixa da bolha
-            dpToPx(36), // altura fixa da bolha
+            dpToPx(42), // largura fixa da bolha
+            dpToPx(42), // altura fixa da bolha
             type,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
