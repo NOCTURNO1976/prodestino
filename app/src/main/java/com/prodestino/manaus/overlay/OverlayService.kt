@@ -6,6 +6,7 @@ import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.Build
 import android.os.IBinder
+import android.provider.Settings
 import android.view.*
 import android.widget.ImageView
 import androidx.core.app.NotificationCompat
@@ -44,8 +45,12 @@ class OverlayService : Service() {
         return START_STICKY
     }
 
+    private fun canDraw(): Boolean =
+        if (Build.VERSION.SDK_INT >= 23) Settings.canDrawOverlays(this) else true
+
     private fun show() {
         if (isShowing) return
+        if (!canDraw()) { stopSelf(); return }
 
         // Notificação necessária p/ serviço em 1º plano
         startForeground(
@@ -81,41 +86,40 @@ class OverlayService : Service() {
             y = dpToPx(160)
         }
 
-        // --- Clique: traz o app para frente
+        // Clique: traz o app para frente
         overlayView?.setOnClickListener {
             try {
                 val i = Intent(this, MainActivity::class.java).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or
-                             Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                             Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                    addFlags(
+                        Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                    )
                 }
                 startActivity(i)
             } catch (_: Exception) {}
         }
 
-        // --- Arrastar com "segurar e soltar"
+        // Arrastar com "segurar e soltar"
         overlayView?.setOnTouchListener(object : View.OnTouchListener {
             var startX = 0
             var startY = 0
             var touchStartX = 0f
             var touchStartY = 0f
-            var moved = false
 
             override fun onTouch(v: View, ev: MotionEvent): Boolean {
                 when (ev.actionMasked) {
                     MotionEvent.ACTION_DOWN -> {
-                        moved = false
                         startX = params.x
                         startY = params.y
                         touchStartX = ev.rawX
                         touchStartY = ev.rawY
-                        return false // permite também o clique
+                        return false // permite o clique se não arrastar
                     }
                     MotionEvent.ACTION_MOVE -> {
                         val dx = (ev.rawX - touchStartX).toInt()
                         val dy = (ev.rawY - touchStartY).toInt()
                         if (abs(dx) > dpToPx(3) || abs(dy) > dpToPx(3)) {
-                            moved = true
                             params.x = startX - dx // ancorado em RIGHT
                             params.y = startY + dy
                             try { wm?.updateViewLayout(overlayView, params) } catch (_: Exception) {}
@@ -123,9 +127,8 @@ class OverlayService : Service() {
                         return true
                     }
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                        // Se quase não moveu, deixa o clique acontecer
                         val dist = hypot((ev.rawX - touchStartX), (ev.rawY - touchStartY))
-                        return dist > dpToPx(6) // true = consumiu (tratou como drag)
+                        return dist > dpToPx(6) // true = tratou como drag (consome)
                     }
                 }
                 return false
@@ -137,11 +140,16 @@ class OverlayService : Service() {
     }
 
     private fun hide() {
-        if (!isShowing) return
+        if (!isShowing) { stopSelf(); return }
         try { wm?.removeView(overlayView) } catch (_: Exception) {}
         overlayView = null
         isShowing = false
-        stopForeground(STOP_FOREGROUND_DETACH)
+        if (Build.VERSION.SDK_INT >= 24) {
+            stopForeground(Service.STOP_FOREGROUND_DETACH)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
         stopSelf()
     }
 
