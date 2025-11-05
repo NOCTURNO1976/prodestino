@@ -1,18 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/overlay_root"
-    android:layout_width="72dp"
-    android:layout_height="72dp"
+    android:layout_width="84dp"
+    android:layout_height="84dp"
+    android:padding="6dp"
     android:background="@drawable/overlay_bubble_bg"
     android:clickable="true"
-    android:focusable="false"
-    android:padding="0dp">
+    android:focusable="false">
 
     <ImageView
         android:id="@+id/overlay_icon"
-        android:layout_width="28dp"
-        android:layout_height="28dp"
-        android:layout_gravity="center"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:padding="14dp"
+        android:src="@mipmap/ic_launcher_round"
         android:contentDescription="@string/app_name"
-        android:src="@mipmap/ic_launcher" />
+        android:scaleType="fitCenter" />
 </FrameLayout>
