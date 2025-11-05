@@ -4,8 +4,8 @@
 
     <!-- Diâmetro fixo da bolha -->
     <size
-        android:width="48dp"
-        android:height="48dp" />
+        android:width="28dp"
+        android:height="28dp" />
 
     <!-- Fundo translúcido -->
     <solid android:color="#F0FFFFFF" />
