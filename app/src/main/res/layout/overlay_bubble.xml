@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/overlay_root"
-    android:layout_width="84dp"
-    android:layout_height="84dp"
+    android:layout_width="92dp"
+    android:layout_height="92dp"
     android:padding="6dp"
     android:background="@drawable/overlay_bubble_bg"
     android:clickable="true"
@@ -12,7 +12,7 @@
         android:id="@+id/overlay_icon"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:padding="14dp"
+        android:padding="16dp"
         android:src="@mipmap/ic_launcher_round"
         android:contentDescription="@string/app_name"
         android:scaleType="fitCenter" />
