@@ -8,7 +8,6 @@ import android.os.Build
 import android.os.IBinder
 import android.provider.Settings
 import android.view.*
-import android.widget.ImageView
 import androidx.core.app.NotificationCompat
 import com.prodestino.manaus.MainActivity
 import com.prodestino.manaus.R
@@ -52,7 +51,7 @@ class OverlayService : Service() {
         if (isShowing) return
         if (!canDraw()) { stopSelf(); return }
 
-        // Notificação necessária p/ serviço em 1º plano
+        // Notificação necessária para serviço em 1º plano
         startForeground(
             NOTIF_ID,
             NotificationCompat.Builder(this, CHANNEL_ID)
@@ -72,9 +71,10 @@ class OverlayService : Service() {
         else
             WindowManager.LayoutParams.TYPE_PHONE
 
+        // <<< ÚNICO AJUSTE DE TAMANHO: 56dp x 56dp >>>
         val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
+            dpToPx(36), // largura fixa da bolha
+            dpToPx(36), // altura fixa da bolha
             type,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
