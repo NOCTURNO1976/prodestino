@@ -1,15 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="56dp"
-    android:layout_height="56dp"
-    android:background="@drawable/overlay_bubble_bg"
-    android:padding="8dp">
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- “Sombra” suave -->
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="#11000000"/>
+        </shape>
+    </item>
 
-    <ImageView
-        android:id="@+id/bubbleIcon"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:contentDescription="@string/app_name"
-        android:scaleType="centerInside"
-        android:src="@mipmap/ic_launcher" />
-</FrameLayout>
+    <!-- Círculo principal -->
+    <item android:top="2dp" android:bottom="-2dp">
+        <shape android:shape="oval">
+            <solid android:color="#2196F3"/>
+        </shape>
+    </item>
+</layer-list>
