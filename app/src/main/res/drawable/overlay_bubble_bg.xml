@@ -4,8 +4,8 @@
 
     <!-- TAMANHO DA BOLHA: ajuste aqui (84dp, 92dp, 96dp...) -->
     <size
-        android:width="92dp"
-        android:height="92dp" />
+        android:width="42dp"
+        android:height="42dp" />
 
     <!-- Cor de fundo levemente translúcida para destacar em qualquer tela -->
     <solid android:color="#F0FFFFFF" />
